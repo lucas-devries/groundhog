@@ -234,10 +234,27 @@ Kein Werkzeug. Die Engine muss `.scratch/<feature-slug>/issues/*.md` selbst pars
 
 ## Nicht verifiziert
 
-- Ob `is:blocked` nur **offene** Blocker zählt. Die REST-Summe `blocked_by` zählt laut Schema nur offene ("total ... (open and closed)" ist das andere Feld), für die Suche fehlt eine Doku-Aussage. Prüfung nach dem Schließen von #4 siehe Nachtrag unten.
+- Ob `is:blocked` nur **offene** Blocker zählt: in der Doku nicht belegt, aber empirisch bestätigt (Nachtrag unten).
 - Ob `gh issue view --json subIssues,blockedBy` bei mehr als 100 Einträgen paginiert. Bei den Grenzen (100 Sub-Issues, 50 Blocker) wahrscheinlich unkritisch.
 - Wie schnell der Suchindex Änderungen an Dependencies übernimmt.
 - Die Standard-Sortierung von `GET .../sub_issues` ist in der REST-Doku nicht angegeben; hier stimmte sie mit der Parent-Reihenfolge überein.
 - Ob `subIssuesSummary.completed` als `NOT_PLANNED` geschlossene Sub-Issues mitzählt.
 - Cross-Repo-Kanten: Sub-Issues müssen demselben Owner gehören ([REST sub-issues](https://docs.github.com/en/rest/issues/sub-issues)); für Dependencies keine Aussage gefunden.
 - Die GraphQL-Referenzseite und die Such-Doku für `parent-issue:` konnten nicht gelesen werden; GraphQL per Introspection ersetzt, `parent-issue:` nur empirisch belegt.
+
+## Nachtrag: Verhalten nach dem Schließen eines Blockers
+
+Nach `gh issue close 4` (#4 blockierte nur #8 allein), wenige Sekunden später:
+
+```console
+$ gh api repos/lucas-devries/groundhog/issues/8 --jq '{number,issue_dependencies_summary}'
+{"issue_dependencies_summary":{"blocked_by":0,"blocking":0,"total_blocked_by":1,"total_blocking":0},"number":8}
+$ gh issue view 4 --json state,stateReason
+{"state":"CLOSED","stateReason":"COMPLETED"}
+$ gh issue list --search 'parent-issue:lucas-devries/groundhog#1 -is:blocked' --json number --jq '[.[].number]'
+[8,3,2]
+$ gh issue view 1 --json subIssuesSummary
+{"subIssuesSummary":{"completed":1,"percentCompleted":11,"total":9}}
+```
+
+Damit belegt: `issue_dependencies_summary.blocked_by` und `is:blocked` zählen nur **offene** Blocker; `total_blocked_by` zählt alle. Der Suchindex hatte die Änderung hier nach wenigen Sekunden übernommen. `gh issue close` ohne Grund setzt `stateReason: COMPLETED`.
