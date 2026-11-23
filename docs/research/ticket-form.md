@@ -244,7 +244,7 @@ Kein Werkzeug. Die Engine muss `.scratch/<feature-slug>/issues/*.md` selbst pars
 
 ## Nachtrag: Verhalten nach dem Schließen eines Blockers
 
-Nach `gh issue close 4` (#4 blockierte nur #8 allein), wenige Sekunden später:
+Nach `gh issue close 4` (#8 war nur durch #4 blockiert), wenige Sekunden später:
 
 ```console
 $ gh api repos/lucas-devries/groundhog/issues/8 --jq '{number,issue_dependencies_summary}'
