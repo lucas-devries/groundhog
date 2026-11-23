@@ -1,0 +1,84 @@
+# Vorbild für die AFK-Loop
+
+Recherche zu Issue #2. Stand: 2026-11-23. Quellen sind Quellcode, READMEs, Docs und Artikel der Autoren selbst; jede Aussage ist verlinkt. Code-Links zeigen auf feste Commits.
+
+## Antwort
+
+**Das Vorbild ist Matt Pococks `sandcastle`, und zwar die Vorlage `sequential-reviewer` zusammen mit der Bibliotheks-API `run()` / `createSandbox()`. Die Ralph-Loop liefert die Grundsätze dazu, ist aber kein Code, den man übernehmen kann.** Keines der Werkzeuge ist eine deterministische Engine im Sinne von groundhog: Bei allen wählt das LLM das Ticket, und Checks, Wiederholungen und das Schließen des Tickets stehen nur im Prompt. Deterministisch sind dort nur die äußere Schleife, die Abschottung und (bei `sandcastle`) der Git-Merge.
+
+**Empfehlung:** Die Engine selbst bauen (Frontier aus dem Task-Graph, Ticket-Ablauf, Checks, Versuchszähler, Übergabe an den Menschen, Merge in den Integration-Branch). Für einen einzelnen Run `sandcastle` als Bibliothek in Betracht ziehen, statt Abschottung, Worktree und den Claude-Aufruf selbst zu schreiben: ein Run wäre dann ein `run()` mit `maxIterations: 1` und `branchStrategy: { type: "branch" }`. Ob groundhog das tatsächlich so macht, gehört in #6 (Abschottung) und #9 (Technik). Dagegen spricht vor allem, dass `sandcastle` noch vor 1.0 steht und häufig bricht (siehe unten). Einfach benutzen statt bauen geht nicht: Ticketwahl, Versuchsgrenzen und Eskalation fehlen dort völlig.
+
+## Was es gibt
+
+### 1. Die Ralph-Loop (Ursprung: Geoffrey Huntley)
+
+Huntley hat die Technik am 14. Juli 2025 beschrieben, als `while :; do cat PROMPT.md | claude-code ; done`, mit der Regel „One item per loop“ und Typsystem und Tests als „back pressure“ ([ghuntley.com/ralph](https://ghuntley.com/ralph/)). Das ist eine reine Endlosschleife um einen Prompt.
+
+### 2. Pococks Ralph (aihero.dev und Workshop-Repos)
+
+Pocock lehrt Ralph als Bash-Skript in zwei Varianten: `once` für einen beobachteten Durchlauf (HITL) und `afk` für eine unbeaufsichtigte Schleife mit Obergrenze ([Getting Started With Ralph](https://www.aihero.dev/getting-started-with-ralph), [11 Tips](https://www.aihero.dev/tips-for-ai-coding-with-ralph-wiggum)). Der Code liegt in seinen Repos, zum Beispiel [`ai-hero-cli/ralph/afk.sh`](https://github.com/mattpocock/ai-hero-cli/blob/2978c525c8ee17e26f45304e64e656af15f36dd4/ralph/afk.sh), [`ralph-workshop-repo-001/plans/afk-claude.sh`](https://github.com/mattpocock/ralph-workshop-repo-001/blob/2f36ec7e4d0c86ff76bbfb61b261a9572c50eb3e/plans/afk-claude.sh) und [`ai-engineer-workshop-2026-project/ralph/afk.sh`](https://github.com/mattpocock/ai-engineer-workshop-2026-project/blob/8f1ea9b0a210caddd5f8d1749be636f7b22a9e62/ralph/afk.sh).
+
+- **Schleife:** `for ((i=1; i<=$1; i++))`, das Argument ist die Obergrenze. Jede Iteration startet Claude neu mit `--print --output-format stream-json`, also mit frischem Kontext. Die Schleife endet vorzeitig, wenn das Ergebnis `<promise>NO MORE TASKS</promise>` enthält, in der Workshop-Variante auch bei `<promise>ABORT</promise>` mit Exit-Code 1 ([afk-claude.sh](https://github.com/mattpocock/ralph-workshop-repo-001/blob/2f36ec7e4d0c86ff76bbfb61b261a9572c50eb3e/plans/afk-claude.sh)).
+- **Ticketwahl:** Das Skript gibt dem Agent alle offenen Tickets (`gh issue list --state open --json number,title,body,comments`, oder `cat issues/*.md` für lokale Dateien) und die letzten Commits mit. Der Agent wählt selbst, nach einer Prioritätenliste im Prompt (Bugfixes, Infrastruktur, Tracer Bullets, Polish, Refactors) und nur „AFK issues, not the HITL ones“ ([ai-hero-cli/ralph/prompt.md](https://github.com/mattpocock/ai-hero-cli/blob/2978c525c8ee17e26f45304e64e656af15f36dd4/ralph/prompt.md)). Pocock nennt das ausdrücklich die Verbesserung: „the agent chooses the task, not you“ ([11 Tips](https://www.aihero.dev/tips-for-ai-coding-with-ralph-wiggum)).
+- **Abschottung:** `docker sandbox run claude . -- ...` (Docker Desktop 4.50+): nur das aktuelle Verzeichnis ist gemountet, eine Sandbox pro Workspace, Zustand bleibt zwischen Läufen erhalten ([Getting Started](https://www.aihero.dev/getting-started-with-ralph)).
+- **Checks:** nur im Prompt („Before committing, run the feedback loops: `pnpm run test` … `pnpm run typecheck`“). Pocock empfiehlt zusätzlich Hooks, die Commits blockieren, solange etwas fehlschlägt ([11 Tips](https://www.aihero.dev/tips-for-ai-coding-with-ralph-wiggum)).
+- **Wiederholungen:** keine. Ist ein Ticket nicht fertig, schreibt der Agent einen Kommentar ans Ticket, und die nächste Iteration darf es wieder wählen ([prompt.md](https://github.com/mattpocock/ai-hero-cli/blob/2978c525c8ee17e26f45304e64e656af15f36dd4/ralph/prompt.md)). Es gibt keinen Zähler pro Ticket.
+- **Merge:** keiner. Der Agent committet direkt auf den aktuellen Branch; Branch und PR pro Iteration nennt Pocock nur als Variante ([11 Tips](https://www.aihero.dev/tips-for-ai-coding-with-ralph-wiggum), Tipp 11).
+- **Ticket schließen:** der Agent selbst, per `gh issue close` oder durch Verschieben nach `issues/done/` ([ai-engineer-workshop-2026-project/ralph/prompt.md](https://github.com/mattpocock/ai-engineer-workshop-2026-project/blob/8f1ea9b0a210caddd5f8d1749be636f7b22a9e62/ralph/prompt.md)).
+
+Pocock lehnt das offizielle Anthropic-Plugin `ralph-loop` ab ([Why the Anthropic Ralph plugin sucks](https://www.aihero.dev/why-the-anthropic-ralph-plugin-sucks)). Das Plugin hält Claude mit einem Stop-Hook in derselben Session fest (`"decision": "block"` in [`stop-hook.sh`](https://github.com/anthropics/claude-plugins-official/blob/30202c767cfaf325212b3921ab484f83adaec850/plugins/ralph-loop/hooks/stop-hook.sh)), sodass der Kontext mit jeder Runde wächst; eine Bash-Schleife gibt jeder Runde ein frisches Kontextfenster. Für groundhog folgt daraus: ein Run ist ein eigener `claude -p`-Prozess, kein Stop-Hook.
+
+### 3. `sandcastle` (Pocock, `@ai-hero/sandcastle`)
+
+Eine TypeScript-Bibliothek: „You invoke agents with a single `sandcastle.run()`“, Sandcastle schottet den Agent ab und merged die Commits zurück ([README](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/README.md)). MIT, aktuell 0.14.0, 46 stabile Versionen (91 mit Vorabversionen) seit dem 26. März 2026, ein Dist-Tag `v1-next` ist in Arbeit (`npm view @ai-hero/sandcastle`). Die Schleife selbst schreibt der Nutzer in `.sandcastle/main.mts`; `sandcastle init` legt dafür eine von fünf Vorlagen an: `blank`, `simple-loop`, `sequential-reviewer`, `parallel-planner`, `parallel-planner-with-review` ([init.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/init.md)).
+
+- **Agent-Aufruf:** `claudeCode()` baut `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model …` und übergibt den Prompt über stdin ([AgentProvider.ts, Z. 1739–1770](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/AgentProvider.ts#L1739-L1770)). Eine Iteration endet beim Prozessende, beim Completion-Signal `<promise>COMPLETE</promise>` (mit 60 s Gnadenfrist für hängende Prozesse) oder mit einem Fehler nach `idleTimeoutSeconds` (Standard 600) ([iterations.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/iterations.md), [branch-strategies.md, `WorktreeRunOptions`](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/branch-strategies.md)).
+- **Ticketwahl:** nicht in der Bibliothek. Die Vorlagen geben dem Agent eine fertige Liste per Shell-Ausdruck im Prompt (`` !`{{LIST_TASKS_COMMAND}}` ``) und lassen ihn wählen: „Pick the highest-priority open issue that is not blocked by another open issue“ ([simple-loop/prompt.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/templates/simple-loop/prompt.md)). Für GitHub Issues filtert `init` nur auf das Label `Sandcastle`, für Beads nimmt es `bd ready --json` ([InitService.ts, Z. 741–763](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/InitService.ts#L741-L763)). Bei `parallel-planner` baut sogar ein Opus-Agent den Abhängigkeitsgraphen und gibt die freien Tickets als JSON aus ([parallel-planner/plan-prompt.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/templates/parallel-planner/plan-prompt.md)). Eine deterministisch berechnete Frontier gibt es nirgends; am nächsten kommt `bd ready` aus Beads.
+- **Abschottung:** der stärkste Teil. Austauschbare Sandbox-Provider: nativ (`seatbelt()` auf macOS, `bwrap()` auf Linux), Docker, Podman, Cloud (E2B, Modal, Sprites, Vercel, Daytona) und `noSandbox()` ([sandbox-providers.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/sandbox-providers.md)). Dazu Worktrees pro Branch und gehärtete Git-Mounts: `.git/config`, `.git/hooks` und die Worktree-Verwaltung sind im Sandbox read-only ([branch-strategies.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/branch-strategies.md)). Die Doku sagt selbst, dass `seatbelt()` schwächer abschottet als Docker Desktop und den macOS-Schlüsselbund nicht sicher verbirgt.
+- **Checks:** in den Vorlagen nur im Prompt („run `npm run typecheck` and `npm run test` before committing“). Die API erlaubt aber einen echten deterministischen Check: `sandbox.exec("npm test")` liefert den Exit-Code zurück, ohne zu werfen, und die Doku zeigt genau dieses Muster als Gate zwischen Implementieren und Review ([run.md, `createSandbox()`](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/run.md)). Hooks laufen nur beim Start des Sandbox, nicht danach ([hooks.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/hooks.md)).
+- **Wiederholungen:** keine Versuche pro Ticket. `maxIterations` begrenzt nur die Zahl der Agent-Aufrufe; `maxRetries` gibt es nur für fehlerhafte strukturierte Ausgabe ([Output.ts](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/Output.ts)). Sessions lassen sich per `resumeSession` fortsetzen ([agent-sessions.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/agent-sessions.md)). Ein blockiertes Ticket kommentiert der Agent laut Prompt und lässt es offen.
+- **Merge:** drei Branch-Strategien. `merge-to-head` arbeitet auf einem Temp-Branch im Worktree und merged ihn am Ende mit `git merge` in den Branch, der beim Aufruf ausgecheckt war; scheitert der Merge, bricht Sandcastle ihn ab, lässt den Ziel-Branch unverändert und behält den Temp-Branch ([lifecycleHostGit.ts, Z. 60–104](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/lifecycleHostGit.ts#L60-L104)). `branch` legt die Commits auf einen benannten Branch und merged nicht. Bei `parallel-planner` merged ein Sonnet-Agent die Branches und löst Konflikte selbst ([merge-prompt.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/templates/parallel-planner/merge-prompt.md)).
+- **Beobachtbarkeit:** Run-Logs pro Lauf als Datei und ein Callback pro Stream-Event ([run-logs.md](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/docs/guide/run-logs.md)).
+
+Die Vorlage, die groundhog am nächsten kommt, ist `sequential-reviewer` ([main.mts](https://github.com/mattpocock/sandcastle/blob/1b380ca5e7a9fbece96c49d9edba264c1f512c4e/src/templates/sequential-reviewer/main.mts)): eine Code-Schleife mit `MAX_ITERATIONS`, pro Durchlauf ein frischer Branch und ein Sandbox, ein Implementer-Aufruf mit `maxIterations: 1` (ein Ticket pro Durchlauf), dann ein Reviewer-Aufruf auf demselben Branch. Die Schleife hört deterministisch auf, sobald der Implementer keine Commits liefert. Sie merged die Branches aber nicht und wählt das Ticket nicht selbst.
+
+### 4. Pococks Skills als Spezifikation, nicht als Werkzeug
+
+- [`implement-spec`](https://github.com/mattpocock/skills/blob/abeeaf95660ba9e8b7c753eb38f441ca707a8823/skills/engineering/implement-spec/SKILL.md) beschreibt den Ablauf, den groundhog in Code gießt: Task-Graph, Frontier, ein Implementer pro Ticket in eigenem Worktree, Merge in den Integration-Branch, am Ende `code-review`. Dort orchestriert aber ein LLM die Subagents, und zwar parallel.
+- [`software-factory`](https://github.com/mattpocock/skills/blob/abeeaf95660ba9e8b7c753eb38f441ca707a8823/skills/in-progress/software-factory/SKILL.md) (unter `in-progress`) liefert die Bremsen, die groundhog übernommen hat: automatische Checks als „deterministic gates (types, lint, tests) that every run must pass“, automatisches und menschliches Review, und „cap every loop of runs at a few tries before a human“. Es zielt auf eine Remote-Factory (Webhooks, CI-Runner), also auf das, was für groundhog v1 ausdrücklich außerhalb des Umfangs liegt.
+
+## Vergleich
+
+| | Ralph (Pocock) | `sandcastle` `sequential-reviewer` | groundhog (Map) |
+| --- | --- | --- | --- |
+| Wer wählt das Ticket | Agent, nach Prioritäten im Prompt | Agent, aus vorgefilterter Liste | Engine, aus der Frontier |
+| Kontext pro Run | frisch (`claude -p`) | frisch (`claude --print`) | frisch |
+| Abschottung | `docker sandbox` | Provider: seatbelt, bwrap, Docker, Cloud | Container oder eigene Maschine |
+| Checks | Prompt (und Commit-Hooks) | Prompt; `sandbox.exec()` möglich | deterministisch, durch die Engine |
+| Versuche pro Ticket | keine | keine | begrenzt, dann Mensch |
+| Merge | keiner, Commit auf aktuellen Branch | keiner; `merge-to-head` per Git möglich | in Integration-Branch, am Ende in Ziel-Branch |
+| Ticket schließen | Agent | Agent | Engine (offen, siehe #5) |
+| Ende | Promise-Tag oder Obergrenze | keine Commits oder Obergrenze | Frontier leer |
+
+## Was groundhog übernehmen sollte
+
+1. **Ein Run ist ein frischer `claude -p`-Prozess mit genau einem Ticket.** Darin sind sich Huntley, Pocock und `sandcastle` einig; Pocock begründet es mit dem Kontextfenster.
+2. **Die Engine wählt das Ticket.** Das ist der Kern dessen, was groundhog von Ralph unterscheidet. Ralphs Prioritätenliste lässt sich höchstens als Sortierung innerhalb der Frontier übernehmen.
+3. **Checks laufen außerhalb des Agents**, wie `sandbox.exec()` in der `sandcastle`-Doku: Exit-Code entscheidet, nicht der Agent.
+4. **Obergrenzen überall**: Versuche pro Ticket (fehlt bei allen), Idle-Timeout pro Run (wie `idleTimeoutSeconds`), Gnadenfrist nach dem Ende-Signal (wie `completionTimeoutSeconds`).
+5. **Ein gescheiterter Merge lässt den Ziel-Branch unverändert** und behält den Arbeits-Branch, wie `mergeToHost` in `sandcastle`. Konflikte nicht von einem LLM auflösen lassen, ohne dass danach die Checks erneut laufen.
+6. **Git-Interna im Sandbox schützen** (read-only `.git/config` und `.git/hooks`), weil Runs mit Bypass-Permissions laufen.
+
+## Benutzen statt bauen?
+
+- **Ralph-Skripte:** nein. Sie sind 30 Zeilen Bash, und alles Deterministische, das groundhog braucht, fehlt ihnen.
+- **`sandcastle` als ganzes Werkzeug:** nein. Es ist eine Bibliothek für eigene Schleifen; die Schleife, die Ticketwahl, die Versuche und die Eskalation müsste groundhog trotzdem schreiben.
+- **`sandcastle` als Run-Schicht:** möglich und naheliegend. Es nimmt groundhog Abschottung, Worktree, Git-Härtung, den Claude-Aufruf mit Stream-Parsing, Timeouts und Logs ab. Dagegen spricht: Version 0.x mit 46 stabilen Releases in acht Monaten und einem angekündigten 1.0, also Bruchgefahr; eine große Abhängigkeit (intern auf Effect gebaut, sechs Agents, zehn Sandbox-Provider), von der groundhog nur Claude Code und ein oder zwei Provider braucht; und die Zwischenschicht steht zwischen groundhog und den Flags von `claude -p` (#3). Wenn groundhog es nutzt, dann mit fest gepinnter Version und hinter einer eigenen schmalen Schnittstelle für „einen Run ausführen“.
+
+## Nicht geprüft
+
+- Ich habe nur Pococks GitHub-Konto, aihero.dev, Huntleys Originalartikel und das offizielle Anthropic-Plugin angesehen. Andere Loop-Werkzeuge außerhalb dieses Umfelds habe ich nicht gesucht; es mag ein deterministischeres Vorbild geben.
+- `sandcastle` habe ich nur gelesen, nicht ausgeführt. Ob `seatbelt()` mit `claude` und einem `CLAUDE_CODE_OAUTH_TOKEN` auf macOS wirklich läuft, ist ungeprüft.
+- Die aihero.dev-Artikel nennen keinen Autor im Text; sie liegen auf Pococks Seite und verweisen auf seine Repos. Ihr Inhalt stammt aus einer automatischen Zusammenfassung der Seiten, nicht aus einer wörtlichen Kopie.
+- Die Workshop-Inhalte hinter der Bezahlschranke (zum Beispiel „Day 5: Ralph“) habe ich nicht gesehen. Ob Pocock dort Ticketwahl oder Wiederholungen anders löst, ist offen.
+- Das Dist-Tag `v1-next` von `sandcastle` habe ich nicht untersucht; die API kann sich mit 1.0 ändern.
