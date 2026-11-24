@@ -21,6 +21,12 @@ const kurz = (s, n = breite() - 10) => {
   return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
+const DIFF_MAX = 12
+const diffZeilen = (zeilen, n) => [
+  ...zeilen.slice(0, DIFF_MAX).map((l) => (l[0] === '+' ? gruen : l[0] === '-' ? rot : matt)(kurz(l[0] + ' ' + l.slice(1), n))),
+  ...(zeilen.length > DIFF_MAX ? [matt(`… ${zeilen.length - DIFF_MAX} weitere Zeilen`)] : []),
+]
+
 // ---------- gespielte Daten ----------
 const VERSION = '0.1.0'
 const spec = { nr: 42, titel: 'Export als CSV' }
@@ -55,7 +61,12 @@ function mitschrift() {
       for (const c of j.message.content)
         if (c.type === 'tool_result') {
           const s = typeof c.content === 'string' ? c.content : (c.content ?? []).map((x) => x.text ?? '').join(' ')
-          ereignisse.push({ art: 'ergebnis', s, fehler: !!c.is_error })
+          // Diff wie im Claude-Code-Fenster: Edit liefert structuredPatch, Write (neue Datei) nur content
+          const r = j.tool_use_result ?? {}
+          let diff = (r.structuredPatch ?? []).flatMap((h) => h.lines)
+          if (!diff.length && r.type === 'create') diff = r.content.trimEnd().split('\n').map((l) => '+' + l)
+          if (diff.length) ereignisse.push({ art: 'diff', zeilen: diff })
+          else ereignisse.push({ art: 'ergebnis', s, fehler: !!c.is_error })
         }
     if (j.type === 'result')
       ende = { dauer: `${Math.round(j.duration_ms / 1000)}s`, kosten: `$${(j.total_cost_usd ?? 0).toFixed(2)}`, session: j.session_id }
@@ -179,6 +190,7 @@ const A = {
     if (e.art === 'text') out(`  │ ${kurz(e.s)}`)
     if (e.art === 'tool') out(`  │ ${cyan('⏺')} ${fett(e.name)} ${matt(kurz(e.s, breite() - 20))}`)
     if (e.art === 'ergebnis') out(`  │   ${(e.fehler ? rot : matt)('⎿ ' + kurz(e.s, breite() - 14))}`)
+    if (e.art === 'diff') for (const l of diffZeilen(e.zeilen, breite() - 12)) out(`  │     ${l}`)
   },
   limit: (t, bis) => out(`  ${gelb('⏸')} Usage-Limit erreicht. Der Lauf wartet bis ${bis} und setzt Versuch dann neu an (zählt nicht).`),
   async geprueft(t, n, pruefungen, ok) {
@@ -231,6 +243,7 @@ const B = {
     if (e.art === 'text') this.puffer.push(kurz(e.s, breite() - 2))
     if (e.art === 'tool') this.puffer.push(`${cyan('⏺')} ${fett(e.name)} ${matt(kurz(e.s, breite() - 20))}`)
     if (e.art === 'ergebnis') this.puffer.push(`  ${(e.fehler ? rot : matt)('⎿ ' + kurz(e.s, breite() - 8))}`)
+    if (e.art === 'diff') this.puffer.push(...diffZeilen(e.zeilen, breite() - 8).map((l) => '    ' + l))
     this.zeichne()
   },
   limit(t, bis) {
