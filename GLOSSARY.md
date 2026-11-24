@@ -36,6 +36,10 @@ _Avoid_: Session, Job
 Ein einzelner Agent-Aufruf an genau einem Ticket innerhalb eines Laufs.
 _Avoid_: Session, Iteration
 
+**Mitschrift**:
+Die fortlaufende Anzeige dessen, was der Agent in einem Run tut. Ein Mensch kann sie lesen, aber nicht in den Run eingreifen.
+_Avoid_: Log, Transcript, Stream
+
 **Versuch**:
 Ein Durchgang aus einem Run und den anschließenden Checks an einem Ticket. Die Zahl der Versuche pro Ticket ist begrenzt.
 _Avoid_: Retry, Anlauf
