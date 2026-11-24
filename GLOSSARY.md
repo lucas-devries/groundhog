@@ -36,6 +36,10 @@ _Avoid_: Session, Job
 Ein einzelner Agent-Aufruf an genau einem Ticket innerhalb eines Laufs.
 _Avoid_: Session, Iteration
 
+**AFK-Hinweis**:
+Der feste Zusatz, den die Engine jedem Run mitgibt, damit er ohne Menschen zu Ende läuft.
+_Avoid_: System-Prompt, Zusatz-Prompt
+
 **Mitschrift**:
 Die fortlaufende Anzeige dessen, was der Agent in einem Run tut. Ein Mensch kann sie lesen, aber nicht in den Run eingreifen.
 _Avoid_: Log, Transcript, Stream
