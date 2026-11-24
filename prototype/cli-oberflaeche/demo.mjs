@@ -23,7 +23,7 @@ const kurz = (s, n = breite() - 10) => {
 
 const DIFF_MAX = 12
 const diffZeilen = (zeilen, n) => [
-  ...zeilen.slice(0, DIFF_MAX).map((l) => (l[0] === '+' ? gruen : l[0] === '-' ? rot : matt)(kurz(l[0] + ' ' + l.slice(1), n))),
+  ...zeilen.slice(0, DIFF_MAX).map((l) => (l[0] === '+' ? gruen : l[0] === '-' ? rot : matt)((l[0] + ' ' + l.slice(1)).slice(0, n))), // nicht kurz(): Einrückung bleibt
   ...(zeilen.length > DIFF_MAX ? [matt(`… ${zeilen.length - DIFF_MAX} weitere Zeilen`)] : []),
 ]
 
