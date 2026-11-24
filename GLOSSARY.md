@@ -21,8 +21,12 @@ Die Tickets einer Spec zusammen mit ihren Blocking-Beziehungen.
 _Avoid_: Backlog, Ticketliste
 
 **Frontier**:
-Die offenen Tickets einer Spec, deren Blocker alle geschlossen sind.
+Die offenen, für den Agent freigegebenen Tickets einer Spec, deren Blocker alle geschlossen sind und die kein anderer beansprucht hat.
 _Avoid_: Queue, Ready-Liste
+
+**Tracker**:
+Der Ort, an dem eine Spec und ihre Tickets liegen. Er ist die einzige Quelle der Wahrheit für den Task-Graph; die Engine führt kein eigenes Abbild.
+_Avoid_: Board, Backlog
 
 **Lauf**:
 Eine Ausführung der Engine über eine Spec, vom Start bis kein Ticket mehr umsetzbar ist.
