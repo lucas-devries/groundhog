@@ -30,7 +30,11 @@ _Avoid_: Session, Job
 
 **Run**:
 Ein einzelner Agent-Aufruf an genau einem Ticket innerhalb eines Laufs.
-_Avoid_: Session, Versuch, Iteration
+_Avoid_: Session, Iteration
+
+**Versuch**:
+Ein Durchgang aus einem Run und den anschließenden Checks an einem Ticket. Die Zahl der Versuche pro Ticket ist begrenzt.
+_Avoid_: Retry, Anlauf
 
 **Ticket-Ablauf**:
 Die feste Folge von Schritten, die jedes Ticket durchläuft. Für jedes Ticket identisch.
@@ -44,6 +48,14 @@ _Avoid_: Gate, Validierung
 Der Branch, auf dem die Arbeit aller Tickets einer Spec zusammenläuft.
 _Avoid_: Feature-Branch
 
+**Ticket-Branch**:
+Der Branch, auf dem die Arbeit an genau einem Ticket entsteht. Er zweigt vom Integration-Branch ab und fließt erst dorthin zurück, wenn das Ticket seine Checks bestanden hat.
+_Avoid_: Feature-Branch, Arbeits-Branch
+
 **Ziel-Branch**:
 Der Branch, in den die Engine den Integration-Branch am Ende eines Laufs mergen darf.
 _Avoid_: Base-Branch
+
+**Abschluss**:
+Was am Ende eines Laufs mit dem Integration-Branch geschieht, sobald alle Tickets der Spec geschlossen sind: Merge in den Ziel-Branch, PR oder nichts. Ein Mensch wählt ihn vor dem Lauf.
+_Avoid_: Finalisierung, Merge-Modus
