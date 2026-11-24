@@ -5,6 +5,7 @@
 // Nichts hier ist echt außer der Mitschrift: sie spielt run.jsonl ab, einen
 // aufgezeichneten `claude -p --output-format stream-json`-Run. Tracker, Git und Checks sind gespielt.
 import * as p from '@clack/prompts'
+import { common, createEmphasize } from 'emphasize'
 import { readFileSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -22,10 +23,33 @@ const kurz = (s, n = breite() - 10) => {
 }
 
 const DIFF_MAX = 12
-const diffZeilen = (zeilen, n) => [
-  ...zeilen.slice(0, DIFF_MAX).map((l) => (l[0] === '+' ? gruen : l[0] === '-' ? rot : matt)((l[0] + ' ' + l.slice(1)).slice(0, n))), // nicht kurz(): Einrückung bleibt
-  ...(zeilen.length > DIFF_MAX ? [matt(`… ${zeilen.length - DIFF_MAX} weitere Zeilen`)] : []),
-]
+const hell = createEmphasize(common)
+const sprache = { mjs: 'javascript', js: 'javascript', ts: 'typescript', tsx: 'typescript', json: 'json', md: 'markdown', py: 'python', css: 'css', sh: 'bash', yml: 'yaml' }
+// Diff wie im Claude-Code-Fenster: Zeilennummer, +/- Marke, Syntaxfarben.
+// shortcut: jede Zeile wird einzeln eingefärbt, mehrzeilige Strings und Kommentare stimmen dann nicht; für echt die ganze Datei einfärben.
+function diffZeilen(e, n) {
+  const lang = sprache[e.datei.split('.').pop()]
+  const bunt = (c) => (lang ? hell.highlight(lang, c).value : c)
+  const alle = e.hunks.flatMap((h) => h.lines)
+  const zahl = (z) => alle.filter((l) => l[0] === z).length
+  const aus = []
+  for (const h of e.hunks) {
+    let alt = h.oldStart
+    let jetzt = h.newStart
+    for (const l of h.lines) {
+      const code = l.slice(1).slice(0, n - 8)
+      const nr = (x) => String(x).padStart(4)
+      if (l[0] === '+') aus.push(`${gruen(nr(jetzt++) + ' +')} ${bunt(code)}`)
+      else if (l[0] === '-') aus.push(`${rot(nr(alt++) + ' -')} ${matt(code)}`)
+      else aus.push(`${matt(nr(jetzt++) + '  ')} ${bunt(code)}`) && alt++
+    }
+  }
+  return [
+    matt(`⎿ ${zahl('+')} Zeile${zahl('+') === 1 ? '' : 'n'} hinzugefügt, ${zahl('-')} entfernt`),
+    ...aus.slice(0, DIFF_MAX),
+    ...(aus.length > DIFF_MAX ? [matt(`     … ${aus.length - DIFF_MAX} weitere Zeilen`)] : []),
+  ]
+}
 
 // ---------- gespielte Daten ----------
 const VERSION = '0.1.0'
@@ -63,9 +87,9 @@ function mitschrift() {
           const s = typeof c.content === 'string' ? c.content : (c.content ?? []).map((x) => x.text ?? '').join(' ')
           // Diff wie im Claude-Code-Fenster: Edit liefert structuredPatch, Write (neue Datei) nur content
           const r = j.tool_use_result ?? {}
-          let diff = (r.structuredPatch ?? []).flatMap((h) => h.lines)
-          if (!diff.length && r.type === 'create') diff = r.content.trimEnd().split('\n').map((l) => '+' + l)
-          if (diff.length) ereignisse.push({ art: 'diff', zeilen: diff })
+          let hunks = r.structuredPatch ?? []
+          if (!hunks.length && r.type === 'create') hunks = [{ oldStart: 1, newStart: 1, lines: r.content.trimEnd().split('\n').map((l) => '+' + l) }]
+          if (hunks.length) ereignisse.push({ art: 'diff', datei: r.filePath, hunks })
           else ereignisse.push({ art: 'ergebnis', s, fehler: !!c.is_error })
         }
     if (j.type === 'result')
@@ -190,7 +214,7 @@ const A = {
     if (e.art === 'text') out(`  │ ${kurz(e.s)}`)
     if (e.art === 'tool') out(`  │ ${cyan('⏺')} ${fett(e.name)} ${matt(kurz(e.s, breite() - 20))}`)
     if (e.art === 'ergebnis') out(`  │   ${(e.fehler ? rot : matt)('⎿ ' + kurz(e.s, breite() - 14))}`)
-    if (e.art === 'diff') for (const l of diffZeilen(e.zeilen, breite() - 12)) out(`  │     ${l}`)
+    if (e.art === 'diff') for (const l of diffZeilen(e, breite() - 12)) out(`  │   ${l}`)
   },
   limit: (t, bis) => out(`  ${gelb('⏸')} Usage-Limit erreicht. Der Lauf wartet bis ${bis} und setzt Versuch dann neu an (zählt nicht).`),
   async geprueft(t, n, pruefungen, ok) {
@@ -243,7 +267,7 @@ const B = {
     if (e.art === 'text') this.puffer.push(kurz(e.s, breite() - 2))
     if (e.art === 'tool') this.puffer.push(`${cyan('⏺')} ${fett(e.name)} ${matt(kurz(e.s, breite() - 20))}`)
     if (e.art === 'ergebnis') this.puffer.push(`  ${(e.fehler ? rot : matt)('⎿ ' + kurz(e.s, breite() - 8))}`)
-    if (e.art === 'diff') this.puffer.push(...diffZeilen(e.zeilen, breite() - 8).map((l) => '    ' + l))
+    if (e.art === 'diff') this.puffer.push(...diffZeilen(e, breite() - 8).map((l) => '  ' + l))
     this.zeichne()
   },
   limit(t, bis) {
