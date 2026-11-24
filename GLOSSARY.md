@@ -40,6 +40,10 @@ _Avoid_: Session, Iteration
 Die fortlaufende Anzeige dessen, was der Agent in einem Run tut. Ein Mensch kann sie lesen, aber nicht in den Run eingreifen.
 _Avoid_: Log, Transcript, Stream
 
+**Sandbox**:
+Die Grenze, die groundhog um einen Run und seine Checks legt und die bestimmt, was sie auf dem Rechner und im Netz erreichen. Die Engine liegt außerhalb.
+_Avoid_: Container, Abschottung, Isolation
+
 **Versuch**:
 Ein Durchgang aus einem Run und den anschließenden Checks an einem Ticket. Die Zahl der Versuche pro Ticket ist begrenzt.
 _Avoid_: Retry, Anlauf
