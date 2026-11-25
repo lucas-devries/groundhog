@@ -77,6 +77,11 @@ test('am Usage-Limit wartet die Engine bis zum Reset plus Puffer und startet den
   expect(ereignisse.filter((e) => e.art === 'pause')).toEqual([
     { art: 'pause', ticket: 2, reset, zeit: 1_000 },
   ])
+  // Der Neustart ist ein eigener Run (eigene Rohdatei im Protokoll), aber derselbe Versuch.
+  expect(ereignisse.filter((e) => e.art === 'run-beendet')).toMatchObject([
+    { run: 1, versuch: 1, usageLimit: reset },
+    { run: 2, versuch: 1 },
+  ])
 })
 
 test('ist vor dem Neustart noch ein Fenster erschöpft, wartet die Engine bis zu dessen Reset', async () => {
@@ -125,9 +130,12 @@ test('verlangt ein Abbruch ohne Reset-Zeit Guthaben, hält die Engine den Lauf a
   })
   expect(uhr.jetzt()).toBe(0)
   expect(ereignisse.map((e) => e.art)).toEqual([
+    'lauf-begonnen',
     'ticket-genommen',
     'versuch-begonnen',
+    'run-beendet',
     'lauf-angehalten',
+    'lauf-beendet',
   ])
   expect(tracker.ticket(2)).toMatchObject({ offen: true, labels: ['ready-for-agent'] })
 })
@@ -183,8 +191,7 @@ test('ein Durchgang der Checks endet nach 15 Minuten und ist ein roter Versuch',
     { name: 'Check: true', ok: true },
     { name: 'Check: sleep 30; echo nie', ok: false },
   ])
-  expect(ereignisse.at(-1)).toMatchObject({
-    art: 'ticket-gescheitert',
+  expect(ereignisse.find((e) => e.art === 'ticket-gescheitert')).toMatchObject({
     pruefung: 'Check: sleep 30; echo nie',
   })
 })

@@ -10,6 +10,8 @@ export interface RunAuftrag {
   rueckmeldung?: string
   /** Bricht ab, wenn das Zeitlimit des Runs erreicht ist; der Adapter beendet dann den Run. */
   signal: AbortSignal
+  /** Nimmt jede Zeile der rohen Ausgabe des Runs entgegen (bei Claude: `stream-json`). */
+  ausgabe: (zeile: string) => void
 }
 
 export interface RunErgebnis {
@@ -19,6 +21,9 @@ export interface RunErgebnis {
    * nur mit Guthaben weitergeht.
    */
   usageLimit?: number | 'guthaben'
+  /** Tokens des Runs, wie `claude` sie meldet (`usage`). */
+  tokens?: Record<string, number>
+  kostenUsd?: number
 }
 
 /** Der Agent: startet einen Run an einem Ticket. Dahinter: Claude-Adapter (#33), Fake-Agent. */
