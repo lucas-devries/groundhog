@@ -32,6 +32,10 @@ _Avoid_: Board, Backlog
 Eine Ausführung der Engine über eine Spec, vom Start bis kein Ticket mehr umsetzbar ist.
 _Avoid_: Session, Job
 
+**Sperre**:
+Die Markierung, mit der ein Lauf einen Klon für sich belegt, sodass dort kein zweiter Lauf startet.
+_Avoid_: Lock, Lockfile
+
 **Run**:
 Ein einzelner Agent-Aufruf an genau einem Ticket innerhalb eines Laufs.
 _Avoid_: Session, Iteration
@@ -43,6 +47,14 @@ _Avoid_: System-Prompt, Zusatz-Prompt
 **Mitschrift**:
 Die fortlaufende Anzeige dessen, was der Agent in einem Run tut. Ein Mensch kann sie lesen, aber nicht in den Run eingreifen.
 _Avoid_: Log, Transcript, Stream
+
+**Protokoll**:
+Alles, was ein Lauf dauerhaft auf dem Rechner festhält, sodass ein Mensch ihn nachträglich nachvollziehen kann.
+_Avoid_: Log, Logdatei
+
+**Übersicht**:
+Die Zusammenfassung am Ende eines Laufs: je Ticket ein Ergebnis.
+_Avoid_: Report, Summary
 
 **Sandbox**:
 Die Grenze, die groundhog um einen Run und seine Checks legt und die bestimmt, was sie auf dem Rechner und im Netz erreichen. Die Engine liegt außerhalb.
@@ -63,6 +75,10 @@ _Avoid_: Workflow, Pipeline
 **Check**:
 Eine deterministische Prüfung (Typen, Lint, Tests), die ein Ticket bestehen muss, bevor es als erledigt gilt.
 _Avoid_: Gate, Validierung
+
+**Projekt-Konfiguration**:
+Die Einstellungen, die ein Projekt für alle seine Läufe festlegt.
+_Avoid_: Repo-Konfiguration, Config, Settings
 
 **Integration-Branch**:
 Der Branch, auf dem die Arbeit aller Tickets einer Spec zusammenläuft.
