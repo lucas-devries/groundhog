@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+/** Versuche pro Ticket, wenn die Projekt-Konfiguration nichts anderes sagt. */
+export const VERSUCHE_STANDARD = 3
+
 /** Die Projekt-Konfiguration, `groundhog.json` im Repo-Root. */
 export interface Konfiguration {
   checks: string[]
@@ -54,7 +57,7 @@ export function leseKonfiguration(verzeichnis: string): Gelesen {
   }
 
   const checks = liste('checks', roh.checks, true)
-  const versuche = roh.versuche ?? 3
+  const versuche = roh.versuche ?? VERSUCHE_STANDARD
   if (!Number.isInteger(versuche) || (versuche as number) < 1 || (versuche as number) > 10) {
     fehler.push('versuche: ganze Zahl von 1 bis 10 erwartet')
   }

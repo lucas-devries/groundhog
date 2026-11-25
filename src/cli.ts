@@ -105,7 +105,7 @@ async function lauf(spec: number): Promise<number> {
       auswahl: start.auswahl,
       verzeichnis,
       checks: konfiguration.checks,
-      versuche: konfiguration.versuche,
+      maxVersuche: konfiguration.versuche,
       token,
       versionen: { groundhog: VERSION, ...start.versionen },
       protokoll: protokoll.pfad,

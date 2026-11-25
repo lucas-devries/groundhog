@@ -23,7 +23,7 @@ async function lauf(
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
     verzeichnis,
     checks,
-    versuche,
+    maxVersuche: versuche,
     tracker,
     agent: fakeAgent(skript),
     sandbox: durchreiche,

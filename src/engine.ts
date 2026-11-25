@@ -1,5 +1,6 @@
 import type { Agent, Block, RunErgebnis } from './agent.ts'
 import { git } from './git.ts'
+import { VERSUCHE_STANDARD } from './konfiguration.ts'
 import type { Sandbox } from './sandbox.ts'
 import { type FrontierZustand, frontierZustand, type Ticket, type Tracker } from './tracker.ts'
 import { fundort, kommentarGescheitert, uebersicht } from './uebersicht.ts'
@@ -24,7 +25,7 @@ export interface LaufEingabe {
   verzeichnis: string
   checks: string[]
   /** Höchstzahl der Versuche pro Ticket. */
-  versuche?: number
+  maxVersuche?: number
   /** Wert des `gh`-Tokens; die Engine ersetzt ihn in Run- und Check-Ausgabe durch `***`. */
   token?: string
   /** Versionen von groundhog, `claude` und Skill-Plugin, fürs Protokoll. */
@@ -127,7 +128,7 @@ class Abgebrochen extends Error {}
 
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
-  const { spec, auswahl, verzeichnis, tracker, uhr, versuche = 3 } = eingabe
+  const { spec, auswahl, verzeichnis, tracker, uhr, maxVersuche = VERSUCHE_STANDARD } = eingabe
   const abbruch = eingabe.abbruch ?? new AbortController().signal
   const halt = () => {
     if (abbruch.aborted) throw new Abgebrochen()
@@ -274,9 +275,9 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       /** Die rote Prüfung jedes Versuchs. */
       const rote: string[] = []
       let sessionId: string | undefined
-      while (versuch < versuche) {
+      while (versuch < maxVersuche) {
         versuch++
-        melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
+        melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: maxVersuche })
         let run: RunErgebnis
         let signal: AbortSignal
         while (true) {
@@ -340,7 +341,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
           nr,
           kommentarGescheitert({
             rote,
-            versuche,
+            maxVersuche,
             ausgabe:
               rot.ausgabe === undefined
                 ? undefined
@@ -385,7 +386,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       loescheTicketBranch(verzeichnis, ticketBranch)
       await kommentiere(
         nr,
-        `Erledigt: ${commit} in ${integration}, Versuch ${versuch} von ${versuche}, Blocks: ${blocks.length}`,
+        `Erledigt: ${commit} in ${integration}, Versuch ${versuch} von ${maxVersuche}, Blocks: ${blocks.length}`,
       )
       await tracker.schliesse(nr)
       melde({ art: 'ticket-erledigt', ticket: nr, commit, versuche: versuch })

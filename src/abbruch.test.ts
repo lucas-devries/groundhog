@@ -35,7 +35,7 @@ function aufbau(tracker = zweiTickets()) {
       auswahl: { zielBranch: 'main', abschluss: 'nichts' },
       verzeichnis: klon,
       checks: ['true'],
-      versuche,
+      maxVersuche: versuche,
       tracker,
       agent: fakeAgent(skript),
       sandbox: durchreiche,

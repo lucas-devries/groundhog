@@ -33,7 +33,7 @@ async function lauf(
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
     verzeichnis: klon,
     checks: optionen.checks ?? ['true'],
-    versuche: optionen.versuche ?? 1,
+    maxVersuche: optionen.versuche ?? 1,
     tracker,
     agent: fakeAgent(skript, optionen.erschoepftBis),
     sandbox: optionen.sandbox ?? durchreiche,

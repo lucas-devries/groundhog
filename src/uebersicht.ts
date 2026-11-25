@@ -172,7 +172,8 @@ function dauer(ms: number): string {
 export function kommentarGescheitert(t: {
   /** Die rote Prüfung jedes Versuchs. */
   rote: string[]
-  versuche: number
+  /** Höchstzahl der Versuche pro Ticket. */
+  maxVersuche: number
   /** Check-Ausgabe des letzten Versuchs, schon gekürzt; fehlt, wenn kein Check rot war. */
   ausgabe?: string
   blocks: number
@@ -181,7 +182,7 @@ export function kommentarGescheitert(t: {
 }): string {
   const teile = [
     'Endgültig gescheitert, jetzt `ready-for-human`.',
-    t.rote.map((p, i) => `- Versuch ${i + 1} von ${t.versuche} rot: ${p}`).join('\n'),
+    t.rote.map((p, i) => `- Versuch ${i + 1} von ${t.maxVersuche} rot: ${p}`).join('\n'),
   ]
   if (t.ausgabe !== undefined) {
     const zaun = '`'.repeat(Math.max(3, ...(t.ausgabe.match(/`+/g) ?? []).map((z) => z.length + 1)))

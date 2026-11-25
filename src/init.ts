@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { git } from './git.ts'
-import { DATEI, type Konfiguration, leseKonfiguration } from './konfiguration.ts'
+import { DATEI, type Konfiguration, leseKonfiguration, VERSUCHE_STANDARD } from './konfiguration.ts'
 import { FESTE_HOSTS } from './sandbox.ts'
 
 type Abgebrochen = symbol
@@ -71,7 +71,7 @@ export async function init({
 
   let vorgabe: Konfiguration = {
     checks: nodeChecks(verzeichnis),
-    versuche: 3,
+    versuche: VERSUCHE_STANDARD,
     zielBranches: [],
     sandbox: { hosts: [], aus: false },
   }
