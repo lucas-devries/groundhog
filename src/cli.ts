@@ -8,6 +8,7 @@ import { init } from './init.ts'
 import { oeffneProtokoll } from './protokoll.ts'
 import { durchreiche } from './sandbox.ts'
 import { starte } from './start.ts'
+import { zeigeTafel } from './tafel.ts'
 import { systemUhr } from './uhr.ts'
 
 const VERSION: string = createRequire(import.meta.url)('../package.json').version
@@ -61,22 +62,25 @@ async function lauf(spec: number): Promise<number> {
     p.cancel(start.meldung)
     return start.exitCode
   }
+  /** Verlässt die Tafel, damit eine Fehlermeldung im normalen Bildschirm stehen bleibt. */
+  let schliesse = () => {}
   try {
     const { verzeichnis, konfiguration, token } = start
-    let zeige: (e: Ereignis) => string[] = () => []
+    let zeige: (e: Ereignis) => void = () => {}
     const protokoll = oeffneProtokoll({
       verzeichnis,
       spec,
       start: systemUhr.jetzt(),
-      weiter: (e) => {
-        for (const zeile of zeige(e)) process.stdout.write(`${zeile}\n`)
-      },
+      weiter: (e) => zeige(e),
     })
-    zeige = anzeige({
-      farbe: process.stdout.isTTY === true,
-      breite: process.stdout.columns,
-      protokoll: protokoll.pfad,
-    })
+    if (process.stdout.isTTY) {
+      ;({ melde: zeige, schliesse } = zeigeTafel(process.stdout, protokoll.pfad))
+    } else {
+      const zeilen = anzeige({ protokoll: protokoll.pfad })
+      zeige = (e) => {
+        for (const zeile of zeilen(e)) process.stdout.write(`${zeile}\n`)
+      }
+    }
     const ergebnis = await fahreLauf({
       spec,
       auswahl: start.auswahl,
@@ -96,6 +100,7 @@ async function lauf(spec: number): Promise<number> {
     if (ergebnis.angehalten) return 1
     return ergebnis.tickets.some((t) => t.ergebnis === 'gescheitert') ? 2 : 0
   } catch (fehler) {
+    schliesse()
     console.error(`groundhog: Lauf abgebrochen: ${(fehler as Error).message}`)
     return 1
   } finally {
