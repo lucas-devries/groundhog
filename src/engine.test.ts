@@ -31,7 +31,10 @@ async function lauf(
   return ereignisse
 }
 
-const einTicket = () => new InMemoryTracker('ich', [{ nummer: 2, offen: true, assignees: [] }])
+const einTicket = () =>
+  new InMemoryTracker('ich', [
+    { nummer: 2, offen: true, labels: ['ready-for-agent'], assignees: [], blocker: [] },
+  ])
 
 const commitet: AgentSkript = ({ verzeichnis }) => {
   commitDatei(verzeichnis, 'a.txt', 'a', 'Ticket 2 umsetzen')

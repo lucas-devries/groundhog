@@ -1,7 +1,7 @@
 import type { Agent } from './agent.ts'
 import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
-import type { Tracker } from './tracker.ts'
+import type { Ticket, Tracker } from './tracker.ts'
 import type { Uhr } from './uhr.ts'
 
 export interface Auswahl {
@@ -55,9 +55,8 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   }
 
   while (true) {
-    // ponytail: Frontier ist hier nur „offen, niedrigste Nummer“; Labels, Blocker und Assignees kommen mit #27.
     const ticket = (await tracker.taskGraph(spec))
-      .filter((t) => t.offen)
+      .filter((t) => bearbeitbar(t, tracker.nutzer))
       .sort((a, b) => a.nummer - b.nummer)[0]
     if (!ticket) return ergebnis
     const nr = ticket.nummer
@@ -107,6 +106,17 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     melde({ art: 'ticket-erledigt', ticket: nr, commit })
     ergebnis.tickets.push({ nummer: nr, ergebnis: 'erledigt', commit })
   }
+}
+
+/** Gehört zur Frontier: Ein mir zugewiesenes Ticket ist der Rest eines abgebrochenen Laufs. */
+function bearbeitbar(t: Ticket, nutzer: string): boolean {
+  return (
+    t.offen &&
+    t.assignees.every((a) => a === nutzer) &&
+    t.labels.includes('ready-for-agent') &&
+    !t.labels.includes('ready-for-human') &&
+    t.blocker.every((b) => !b.offen)
+  )
 }
 
 function branchExistiert(verzeichnis: string, branch: string): boolean {
