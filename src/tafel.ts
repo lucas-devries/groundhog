@@ -1,7 +1,6 @@
 import { stripVTControlCharacters } from 'node:util'
 import { anzeige, stil, uhrzeit } from './anzeige.ts'
-import type { Ereignis } from './engine.ts'
-import type { Ticket } from './tracker.ts'
+import type { Ereignis, GraphTicket } from './engine.ts'
 
 export interface TafelOptionen {
   farbe?: boolean
@@ -22,7 +21,7 @@ export function tafel(optionen: TafelOptionen = {}) {
   // Ungekürzt; gekürzt wird erst beim Zeichnen, auf die Breite, die das Fenster gerade hat.
   const zeilen = anzeige({ ...optionen, breite: Number.POSITIVE_INFINITY })
   let kopf = ''
-  let tickets: Ticket[] = []
+  let tickets: GraphTicket[] = []
   /** Zustand der Tickets, die dieser Lauf angefasst hat; die übrigen zeigen den Tracker. */
   const zustand = new Map<number, string>()
   const warnungen: string[] = []
@@ -100,14 +99,23 @@ export function tafel(optionen: TafelOptionen = {}) {
   return { melde, bildschirm }
 }
 
-/** Zustand eines Tickets, das dieser Lauf (noch) nicht angefasst hat, aus dem Tracker. */
-function vorher(t: Ticket, s: ReturnType<typeof stil>): string {
-  if (!t.offen) return s.gruen('✔ erledigt')
-  if (t.labels.includes('ready-for-human')) return s.matt('– ready-for-human, nicht angefasst')
-  const blocker = t.blocker.filter((b) => b.offen).map((b) => `#${b.nummer}`)
-  if (blocker.length > 0) return s.matt(`○ blockiert von ${blocker.join(', ')}`)
-  if (!t.labels.includes('ready-for-agent')) return s.matt('– nicht freigegeben')
-  return s.matt('· wartet')
+/** Zustand eines Tickets, das dieser Lauf (noch) nicht angefasst hat, wie die Engine ihn meldet. */
+function vorher(t: GraphTicket, s: ReturnType<typeof stil>): string {
+  switch (t.zustand) {
+    case 'geschlossen':
+      return s.gruen('✔ erledigt')
+    case 'ready-for-human':
+      return s.matt('– ready-for-human, nicht angefasst')
+    case 'nicht freigegeben':
+      return s.matt('– nicht freigegeben')
+    case 'blockiert': {
+      const blocker = t.blocker.filter((b) => b.offen).map((b) => `#${b.nummer}`)
+      return s.matt(`○ blockiert von ${blocker.join(', ')}`)
+    }
+    case 'vergeben':
+    case 'bearbeitbar':
+      return s.matt('· wartet')
+  }
 }
 
 /** Kürzt auf `breite` sichtbare Zeichen, ohne eine Farbsequenz zu zerschneiden. */

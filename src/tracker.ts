@@ -1,3 +1,8 @@
+/** Freigabe für den Agent. */
+export const READY_FOR_AGENT = 'ready-for-agent'
+/** Braucht einen Menschen; der Agent fasst es nicht an. */
+export const READY_FOR_HUMAN = 'ready-for-human'
+
 export interface Ticket {
   nummer: number
   offen: boolean
@@ -10,6 +15,29 @@ export interface Ticket {
 export interface Blocker {
   nummer: number
   offen: boolean
+}
+
+/** Ob ein Ticket zur Frontier gehört (`bearbeitbar`), sonst der Grund dagegen. */
+export type FrontierZustand =
+  | 'bearbeitbar'
+  | 'geschlossen'
+  | 'ready-for-human'
+  | 'nicht freigegeben'
+  | 'blockiert'
+  /** Jemand anderem zugewiesen. */
+  | 'vergeben'
+
+/**
+ * Die Frontier-Regel, an einer Stelle. Ein dem eigenen `nutzer` zugewiesenes Ticket ist der Rest
+ * eines abgebrochenen Laufs und bleibt bearbeitbar.
+ */
+export function frontierZustand(t: Ticket, nutzer: string): FrontierZustand {
+  if (!t.offen) return 'geschlossen'
+  if (t.labels.includes(READY_FOR_HUMAN)) return 'ready-for-human'
+  if (!t.labels.includes(READY_FOR_AGENT)) return 'nicht freigegeben'
+  if (t.blocker.some((b) => b.offen)) return 'blockiert'
+  if (!t.assignees.every((a) => a === nutzer)) return 'vergeben'
+  return 'bearbeitbar'
 }
 
 /** Der Tracker in der Form, die die Engine braucht. Dahinter: GitHub-Adapter (#32), In-Memory-Tracker. */
@@ -117,7 +145,7 @@ export class InMemoryTracker implements Tracker {
 
   async markiereGescheitert(nummer: number) {
     const ticket = this.#finde(nummer)
-    ticket.labels = [...ticket.labels.filter((l) => l !== 'ready-for-agent'), 'ready-for-human']
+    ticket.labels = [...ticket.labels.filter((l) => l !== READY_FOR_AGENT), READY_FOR_HUMAN]
   }
 
   #finde(nummer: number): Ticket {

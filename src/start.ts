@@ -6,6 +6,7 @@ import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
 import { oeffneProtokoll, type Protokoll } from './protokoll.ts'
 import { type SrtSandbox, sandboxFehlt, srtSandbox } from './sandbox.ts'
 import { nimmSperre } from './sperre.ts'
+import { frontierZustand, type Ticket } from './tracker.ts'
 
 type Abgebrochen = symbol
 
@@ -251,7 +252,13 @@ export async function starte({
       }
     }
 
-    const auswahl = await menue(dialog, spec, konfiguration, await tracker.taskGraph(spec))
+    const auswahl = await menue(
+      dialog,
+      spec,
+      konfiguration,
+      await tracker.taskGraph(spec),
+      tracker.nutzer,
+    )
     return {
       ok: true,
       verzeichnis,
@@ -335,12 +342,15 @@ async function menue(
   dialog: MenueDialog,
   spec: number,
   konfiguration: Konfiguration,
-  tickets: Awaited<ReturnType<GitHubTracker['taskGraph']>>,
+  tickets: Ticket[],
+  nutzer: string,
 ): Promise<Auswahl> {
   const integration = `spec/${spec}`
-  const mensch = tickets.filter((t) => t.labels.includes('ready-for-human'))
-  const freigegeben = tickets.filter(
-    (t) => t.offen && t.labels.includes('ready-for-agent') && !mensch.includes(t),
+  const zustand = (t: Ticket) => frontierZustand(t, nutzer)
+  const mensch = tickets.filter((t) => zustand(t) === 'ready-for-human')
+  // Freigegeben, auch wenn noch blockiert oder vergeben.
+  const freigegeben = tickets.filter((t) =>
+    ['bearbeitbar', 'blockiert', 'vergeben'].includes(zustand(t)),
   )
   const { sandbox } = konfiguration
   dialog.note(

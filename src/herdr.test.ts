@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import type { Ereignis } from './engine.ts'
 import { herdr } from './herdr.ts'
-import type { Ticket } from './tracker.ts'
+import { frontierZustand, type Ticket } from './tracker.ts'
 
 const ticket = (nummer: number, offen = true): Ticket => ({
   nummer,
@@ -10,7 +10,11 @@ const ticket = (nummer: number, offen = true): Ticket => ({
   assignees: [],
   blocker: [],
 })
-const graph = (...tickets: Ticket[]): Ereignis => ({ art: 'task-graph', tickets, zeit: 0 })
+const graph = (...tickets: Ticket[]): Ereignis => ({
+  art: 'task-graph',
+  tickets: tickets.map((t) => ({ ...t, zustand: frontierZustand(t, 'ich') })),
+  zeit: 0,
+})
 const genommen = (nr: number): Ereignis => ({ art: 'ticket-genommen', ticket: nr, zeit: 0 })
 const begonnen: Ereignis = {
   art: 'lauf-begonnen',

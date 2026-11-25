@@ -1,7 +1,7 @@
 import type { Agent, Block, RunErgebnis } from './agent.ts'
 import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
-import type { Ticket, Tracker } from './tracker.ts'
+import { type FrontierZustand, frontierZustand, type Ticket, type Tracker } from './tracker.ts'
 import { fundort, kommentarGescheitert, uebersicht } from './uebersicht.ts'
 import type { Uhr } from './uhr.ts'
 
@@ -43,7 +43,7 @@ type LaufEreignis =
       versionen: Record<string, string>
     }
   /** Der Task-Graph, wie die Engine ihn vor jedem Ticket und am Ende gelesen hat. */
-  | { art: 'task-graph'; tickets: Ticket[] }
+  | { art: 'task-graph'; tickets: GraphTicket[] }
   | { art: 'push'; branch: string; commit: string }
   /** `uebersicht` als Markdown; das Protokoll legt sie als `uebersicht.md` ab. */
   | { art: 'lauf-beendet'; abschluss: AbschlussErgebnis; uebersicht: string }
@@ -67,6 +67,11 @@ type TicketEreignis = { ticket: number } & (
   | { art: 'ticket-erledigt'; commit: string; versuche: number }
   | { art: 'ticket-gescheitert'; versuche: number; pruefung: string }
 )
+
+/** Ein Ticket im Task-Graph, mit dem Zustand, den die Engine ihm nach der Frontier-Regel gibt. */
+export interface GraphTicket extends Ticket {
+  zustand: FrontierZustand
+}
 
 export interface Pruefergebnis {
   name: string
@@ -162,11 +167,14 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   let genommen: number | undefined
   try {
     while (true) {
-      const graph = await tracker.taskGraph(spec)
+      const graph = (await tracker.taskGraph(spec)).map((t) => ({
+        ...t,
+        zustand: frontierZustand(t, tracker.nutzer),
+      }))
       melde({ art: 'task-graph', tickets: graph })
       halt()
       const ticket = graph
-        .filter((t) => bearbeitbar(t, tracker.nutzer))
+        .filter((t) => t.zustand === 'bearbeitbar')
         .sort((a, b) => a.nummer - b.nummer)[0]
       if (!ticket) {
         const abschluss = await schliesseAb(
@@ -459,17 +467,6 @@ async function schliesseAb(
       await kommentiere(spec, `Integration-Branch: ${integration}`)
       return { art: 'nichts' }
   }
-}
-
-/** Gehört zur Frontier: Ein mir zugewiesenes Ticket ist der Rest eines abgebrochenen Laufs. */
-function bearbeitbar(t: Ticket, nutzer: string): boolean {
-  return (
-    t.offen &&
-    t.assignees.every((a) => a === nutzer) &&
-    t.labels.includes('ready-for-agent') &&
-    !t.labels.includes('ready-for-human') &&
-    t.blocker.every((b) => !b.offen)
-  )
 }
 
 function branchExistiert(verzeichnis: string, branch: string): boolean {

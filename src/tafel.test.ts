@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { expect, test } from 'vitest'
 import type { Ereignis } from './engine.ts'
 import { tafel, zeigeTafel } from './tafel.ts'
-import type { Ticket } from './tracker.ts'
+import { frontierZustand, type Ticket } from './tracker.ts'
 
 /** Der Bildschirm der Tafel nach einer Folge von Ereignissen, ohne Farben. */
 function bildschirm(ereignisse: Ereignis[], breite = 60, hoehe = 14): string[] {
@@ -26,7 +26,11 @@ const begonnen: Ereignis = {
   versionen: { groundhog: '1.2.3' },
   zeit: 0,
 }
-const graph = (...tickets: Ticket[]): Ereignis => ({ art: 'task-graph', tickets, zeit: 0 })
+const graph = (...tickets: Ticket[]): Ereignis => ({
+  art: 'task-graph',
+  tickets: tickets.map((t) => ({ ...t, zustand: frontierZustand(t, 'ich') })),
+  zeit: 0,
+})
 const assistant = (ticket: number, text: string, run = 1): Ereignis => ({
   art: 'run-ausgabe',
   ticket,

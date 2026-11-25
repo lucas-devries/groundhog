@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { setTimeout } from 'node:timers/promises'
-import type { Pr, Ticket, Tracker } from './tracker.ts'
+import { type Pr, READY_FOR_AGENT, READY_FOR_HUMAN, type Ticket, type Tracker } from './tracker.ts'
 
 /** Wartezeiten vor den Wiederholungen, wenn GitHub nicht erreichbar ist: drei Wiederholungen in gut einer Minute. */
 export const WARTEZEITEN = [5_000, 15_000, 45_000]
@@ -29,8 +29,8 @@ const TASK_GRAPH = `query($owner: String!, $repo: String!, $spec: Int!) {
 const START_PRUEFUNG = `query($owner: String!, $repo: String!, $spec: Int!) {
   repository(owner: $owner, name: $repo) {
     url
-    agent: label(name: "ready-for-agent") { name }
-    human: label(name: "ready-for-human") { name }
+    agent: label(name: "${READY_FOR_AGENT}") { name }
+    human: label(name: "${READY_FOR_HUMAN}") { name }
     issue(number: $spec) { subIssues { totalCount } }
   }
 }`
@@ -92,8 +92,8 @@ export class GitHubTracker implements Tracker {
     const { repository: r } = (await this.#graphql(START_PRUEFUNG, spec)).data
     return {
       fehlendeLabels: [
-        ...(r.agent ? [] : ['ready-for-agent']),
-        ...(r.human ? [] : ['ready-for-human']),
+        ...(r.agent ? [] : [READY_FOR_AGENT]),
+        ...(r.human ? [] : [READY_FOR_HUMAN]),
       ],
       subIssues: r.issue.subIssues.totalCount,
       url: r.url,
@@ -124,9 +124,9 @@ export class GitHubTracker implements Tracker {
       'edit',
       String(ticket),
       '--remove-label',
-      'ready-for-agent',
+      READY_FOR_AGENT,
       '--add-label',
-      'ready-for-human',
+      READY_FOR_HUMAN,
     ])
   }
 
