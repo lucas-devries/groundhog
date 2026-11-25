@@ -35,6 +35,13 @@ export interface StartOptionen {
   istTerminal: boolean
   /** Was der Sandbox zum Start fehlt; leer heißt startbar. */
   sandboxFehlt?: () => string[]
+  /** Update-Frage am Anfang des Menüs; ohne sie wird nicht gefragt. */
+  update?: {
+    /** Der neuere Tag, sonst `undefined`, auch wenn der Vergleich scheitert. */
+    neuereVersion: () => string | undefined
+    /** Installiert den Tag; wirft mit Meldung, wenn das scheitert. */
+    installiere: (tag: string) => void
+  }
 }
 
 /** Alles, was der Lauf nach dem Menü braucht. */
@@ -78,6 +85,7 @@ export async function starte({
   dialog,
   istTerminal,
   sandboxFehlt: fehlt = sandboxFehlt,
+  update,
 }: StartOptionen): Promise<Start> {
   let freigeben = () => {}
   try {
@@ -163,6 +171,21 @@ export async function starte({
     }
 
     if (!istTerminal) throw new Abbruch('groundhog braucht ein Terminal an stdin für das Menü.')
+
+    const tag = update?.neuereVersion()
+    if (tag) {
+      const ja = await dialog.confirm({
+        message: `groundhog ${tag} ist erschienen. Jetzt aktualisieren?`,
+        initialValue: false,
+        active: 'Ja',
+        inactive: 'Nein',
+      })
+      if (typeof ja === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
+      if (ja) {
+        update?.installiere(tag)
+        throw new Abbruch(`groundhog ${tag} ist installiert. Starte neu: groundhog ${spec}`, 0)
+      }
+    }
 
     const auswahl = await menue(dialog, spec, konfiguration, await tracker.taskGraph(spec))
     return {
