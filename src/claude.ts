@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import type { Agent, Block, RunErgebnis } from './agent.ts'
+import type { Agent, RunErgebnis } from './agent.ts'
 import type { SrtSandbox } from './sandbox.ts'
 
 export interface ClaudeOptionen {
@@ -63,7 +63,7 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
         ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose'],
         { verzeichnis: process.cwd(), env },
         (zeile) => {
-          for (const fenster of parse(zeile)?.usage_report?.rate_limits?.limits ?? []) {
+          for (const fenster of leseStromZeile(zeile)?.usage_report?.rate_limits?.limits ?? []) {
             if (fenster.percent < 100 || !fenster.resets_at) continue
             bis = Math.max(bis ?? 0, Date.parse(fenster.resets_at))
           }
@@ -129,13 +129,14 @@ function starte(
   })
 }
 
-/** Die Felder des `stream-json`, die der Adapter liest; viele davon sind undokumentiert. */
-interface StromZeile {
+/** Eine Zeile `stream-json` mit den Feldern, die groundhog liest; viele davon sind undokumentiert. */
+export interface StromZeile {
   type?: string
   subtype?: string
   session_id?: string
   /** `system/init` */
   skills?: string[]
+  plugins?: { name: string; version?: string }[]
   /** `result` */
   is_error?: boolean
   usage?: Record<string, unknown>
@@ -145,8 +146,10 @@ interface StromZeile {
   api_error?: string | null
   /** `rate_limit_event`; `resetsAt` in Epoch-Sekunden. */
   rate_limit_info?: { status?: string; resetsAt?: number; errorCode?: string }
-  /** `assistant`: Inhalt mit `tool_use`; `system/permission_denied`: Text der Ablehnung. */
-  message?: string | { content?: { type: string; id?: string; input?: Eingabe }[] }
+  /** `assistant` und `user`: der Inhalt; `system/permission_denied`: Text der Ablehnung. */
+  message?: string | { content?: Inhalt[] }
+  /** `user` nach Edit und Write: der Patch, bei neuen Dateien der Inhalt. */
+  tool_use_result?: { type?: string; filePath?: string; content?: string; structuredPatch?: Hunk[] }
   /** `system/permission_denied` */
   tool_name?: string
   tool_use_id?: string
@@ -155,9 +158,27 @@ interface StromZeile {
   usage_report?: { rate_limits?: { limits?: { percent: number; resets_at?: string }[] } | null }
 }
 
+/** Ein Teil des Inhalts: Text, `tool_use` oder `tool_result`. */
+export interface Inhalt {
+  type?: string
+  id?: string
+  text?: string
+  name?: string
+  input?: Eingabe
+  content?: string | { text?: string }[]
+  is_error?: boolean
+}
+
+export interface Hunk {
+  oldStart: number
+  newStart: number
+  lines: string[]
+}
+
 type Eingabe = Record<string, unknown>
 
-function parse(zeile: string): StromZeile | undefined {
+/** Liest eine Zeile `stream-json`; keine JSON-Zeile ergibt `undefined`. */
+export function leseStromZeile(zeile: string): StromZeile | undefined {
   try {
     return JSON.parse(zeile)
   } catch {
@@ -177,7 +198,7 @@ function auswertung() {
 
   return {
     lies(zeile: string) {
-      const z = parse(zeile)
+      const z = leseStromZeile(zeile)
       if (!z) return
       if (z.api_error === 'usage_limit_reached') limitErreicht = true
       if (z.type === 'system' && z.subtype === 'init') init = z
@@ -216,7 +237,7 @@ function auswertung() {
         skills: init?.skills,
         blocks: [...blocks.values()].map(({ tool, eingabe, grund }) => ({
           tool,
-          befehl: befehl(eingabe),
+          befehl: eingabe ? (wichtigstesArgument(eingabe) ?? JSON.stringify(eingabe)) : '',
           ...(grund !== undefined && { grund }),
         })),
       }
@@ -239,12 +260,11 @@ function auswertung() {
   }
 }
 
-/** Das wichtigste Argument eines Tool-Aufrufs. */
-function befehl(eingabe: Eingabe | undefined): Block['befehl'] {
-  if (!eingabe) return ''
-  for (const feld of ['command', 'file_path', 'url', 'pattern']) {
-    const wert = eingabe[feld]
+/** Das wichtigste Argument eines Tool-Aufrufs, für Mitschrift und Blocks. */
+export function wichtigstesArgument(eingabe: Eingabe | undefined): string | undefined {
+  for (const feld of ['command', 'file_path', 'pattern', 'url', 'description']) {
+    const wert = eingabe?.[feld]
     if (typeof wert === 'string') return wert
   }
-  return JSON.stringify(eingabe)
+  return undefined
 }

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { leseStromZeile, type StromZeile } from './claude.ts'
 import { ABSCHLUSS, type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 import { git } from './git.ts'
 import { GitHubTracker } from './github.ts'
@@ -324,14 +325,10 @@ function skills(verzeichnis: string, versionen: Record<string, string>): string[
     'stream-json',
     '--verbose',
   ])
-  let init: { skills?: string[]; plugins?: { name: string; version?: string }[] } = {}
+  let init: StromZeile = {}
   for (const zeile of ausgabe.split('\n')) {
-    try {
-      const z = JSON.parse(zeile)
-      if (z.type === 'system' && z.subtype === 'init') init = z
-    } catch {
-      // Keine JSON-Zeile.
-    }
+    const z = leseStromZeile(zeile)
+    if (z?.type === 'system' && z.subtype === 'init') init = z
   }
   const version = init.plugins?.find((p) => p.name === 'mattpocock-skills')?.version
   if (version) versionen['mattpocock-skills'] = version

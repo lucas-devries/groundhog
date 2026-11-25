@@ -2,6 +2,7 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
+import { type Hunk, leseStromZeile, wichtigstesArgument } from './claude.ts'
 import { ABSCHLUSS, type Ereignis, integrationBranch } from './engine.ts'
 
 export interface AnzeigeOptionen {
@@ -163,12 +164,6 @@ type Mitschrift =
   | { art: 'ergebnis'; text: string; fehler: boolean }
   | { art: 'diff'; datei: string; hunks: Hunk[] }
 
-interface Hunk {
-  oldStart: number
-  newStart: number
-  lines: string[]
-}
-
 const DIFF_MAX = 12
 
 /** Ein Diff wie im Claude-Code-Fenster: Zusammenfassung, Zeilennummern, `+`/`-`. */
@@ -204,41 +199,21 @@ function diff(d: { datei: string; hunks: Hunk[] }, breite: number, s: Stil): str
   ]
 }
 
-interface StreamZeile {
-  type?: string
-  message?: { content?: unknown }
-  /** Bei Edit und Write: der Patch, bei neuen Dateien der Inhalt. */
-  tool_use_result?: { type?: string; filePath?: string; content?: string; structuredPatch?: Hunk[] }
-}
-interface Inhalt {
-  type?: string
-  text?: string
-  name?: string
-  input?: Record<string, unknown>
-  content?: string | { text?: string }[]
-  is_error?: boolean
-}
-
 /** Liest eine Zeile `stream-json`; was keine Mitschrift ist (auch kein JSON), ergibt nichts. */
 function mitschrift(zeile: string): Mitschrift[] {
-  let z: StreamZeile
-  try {
-    z = JSON.parse(zeile)
-  } catch {
-    return []
-  }
-  const inhalte = Array.isArray(z.message?.content) ? (z.message.content as Inhalt[]) : []
+  const z = leseStromZeile(zeile)
+  const inhalte =
+    typeof z?.message === 'object' && Array.isArray(z.message.content) ? z.message.content : []
   const aus: Mitschrift[] = []
   for (const c of inhalte) {
-    if (z.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
+    if (z?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
       aus.push({ art: 'text', text: c.text })
     }
-    if (z.type === 'assistant' && c.type === 'tool_use') {
-      const i = c.input ?? {}
-      const argument = i.command ?? i.file_path ?? i.pattern ?? i.url ?? i.description ?? ''
-      aus.push({ art: 'tool', name: c.name ?? '?', argument: String(argument) })
+    if (z?.type === 'assistant' && c.type === 'tool_use') {
+      const argument = wichtigstesArgument(c.input) ?? ''
+      aus.push({ art: 'tool', name: c.name ?? '?', argument })
     }
-    if (z.type === 'user' && c.type === 'tool_result') {
+    if (z?.type === 'user' && c.type === 'tool_result') {
       const r = z.tool_use_result
       let hunks = Array.isArray(r?.structuredPatch) ? r.structuredPatch : []
       if (hunks.length === 0 && r?.type === 'create' && typeof r.content === 'string') {
