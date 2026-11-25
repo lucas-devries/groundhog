@@ -1,97 +1,103 @@
 # groundhog
 
-Die Sprache der Engine, die die Tickets einer Spec ohne Menschen abarbeitet.
+The language of the engine that works through the tickets of a spec without humans.
+
+Spec #25 and its tickets are written in German. Each entry names the former German term, so they stay readable.
 
 ## Language
 
 **Engine**:
-Der deterministische Teil von groundhog, der entscheidet, was als Nächstes geschieht. Sie enthält kein LLM.
+The deterministic part of groundhog that decides what happens next. It contains no LLM.
 _Avoid_: Orchestrator, Loop, Agent
 
 **Spec**:
-Die Beschreibung eines Vorhabens, zu der ein Satz Tickets gehört. Die Arbeitseinheit eines Laufs.
+The description of an undertaking that a set of tickets belongs to. The unit of work of a run.
 _Avoid_: PRD, Plan, Feature
 
 **Ticket**:
-Eine fertig spezifizierte, vertikale Scheibe einer Spec, die ohne Rückfragen umsetzbar ist.
+A fully specified, vertical slice of a spec that can be implemented without asking back.
 _Avoid_: Issue, Task, Story
 
 **Task-Graph**:
-Die Tickets einer Spec zusammen mit ihren Blocking-Beziehungen.
-_Avoid_: Backlog, Ticketliste
+The tickets of a spec together with their blocking relations.
+_Avoid_: Backlog, ticket list
 
 **Frontier**:
-Die offenen, für den Agent freigegebenen Tickets einer Spec, deren Blocker alle geschlossen sind und die kein anderer beansprucht hat.
-_Avoid_: Queue, Ready-Liste
+The open tickets of a spec that are released for the agent, whose blockers are all closed and that nobody else has claimed.
+_Avoid_: Queue, ready list
 
 **Tracker**:
-Der Ort, an dem eine Spec und ihre Tickets liegen. Er ist die einzige Quelle der Wahrheit für den Task-Graph; die Engine führt kein eigenes Abbild.
+The place where a spec and its tickets live. It is the single source of truth for the task-graph; the engine keeps no copy of its own.
 _Avoid_: Board, Backlog
 
-**Lauf**:
-Eine Ausführung der Engine über eine Spec, vom Start bis kein Ticket mehr umsetzbar ist.
-_Avoid_: Session, Job
-
-**Sperre**:
-Die Markierung, mit der ein Lauf einen Klon für sich belegt, sodass dort kein zweiter Lauf startet.
-_Avoid_: Lock, Lockfile
-
 **Run**:
-Ein einzelner Agent-Aufruf an genau einem Ticket innerhalb eines Laufs.
-_Avoid_: Session, Iteration
+One execution of the engine over a spec, from the start until no ticket can be implemented any more.
+_Avoid_: Job, Lauf (former German term)
 
-**AFK-Hinweis**:
-Der feste Zusatz, den die Engine jedem Run mitgibt, damit er ohne Menschen zu Ende läuft.
-_Avoid_: System-Prompt, Zusatz-Prompt
+**Lock**:
+The marker with which a run claims a clone for itself, so that no second run starts there.
+_Avoid_: Lockfile, Sperre (former German term)
 
-**Mitschrift**:
-Die fortlaufende Anzeige dessen, was der Agent in einem Run tut. Ein Mensch kann sie lesen, aber nicht in den Run eingreifen.
-_Avoid_: Log, Transcript, Stream
+**Session**:
+A single agent call on exactly one ticket within a run.
+_Avoid_: Run (the former German term, now taken by a whole run), Iteration
 
-**Protokoll**:
-Alles, was ein Lauf dauerhaft auf dem Rechner festhält, sodass ein Mensch ihn nachträglich nachvollziehen kann.
-_Avoid_: Log, Logdatei
+**AFK note**:
+The fixed addition the engine hands every session, so that it runs to the end without humans.
+_Avoid_: system prompt, extra prompt, AFK-Hinweis (former German term)
 
-**Übersicht**:
-Die Zusammenfassung am Ende eines Laufs: je Ticket ein Ergebnis.
-_Avoid_: Report, Summary
+**Transcript**:
+The continuous display of what the agent does in a session. A human can read it but cannot intervene in the session.
+_Avoid_: Log, Stream, Mitschrift (former German term)
+
+**Log**:
+Everything a run keeps on the machine for good, so that a human can trace it afterwards.
+_Avoid_: Logfile, Protokoll (former German term)
+
+**Summary**:
+The wrap-up at the end of a run: one result per ticket.
+_Avoid_: Report, Übersicht (former German term)
 
 **Sandbox**:
-Die Grenze, die groundhog um einen Run und seine Checks legt und die bestimmt, was sie auf dem Rechner und im Netz erreichen. Die Engine liegt außerhalb.
-_Avoid_: Container, Abschottung, Isolation
+The boundary groundhog puts around a session and its checks, which decides what they can reach on the machine and on the network. The engine lies outside.
+_Avoid_: Container, Isolation
 
 **Block**:
-Ein Aufruf des Agents in einem Run, der verweigert und nicht ausgeführt wurde.
-_Avoid_: Denial, Verweigerung, Ablehnung
+A call of the agent in a session that was refused and not executed.
+_Avoid_: Denial, Rejection, Verweigerung (former German term)
 
-**Versuch**:
-Ein Durchgang aus einem Run und den anschließenden Checks an einem Ticket. Die Zahl der Versuche pro Ticket ist begrenzt.
-_Avoid_: Retry, Anlauf
+**Attempt**:
+One pass of a session and the checks that follow it on a ticket. The number of attempts per ticket is limited.
+_Avoid_: Retry, Versuch (former German term)
 
-**Ticket-Ablauf**:
-Die feste Folge von Schritten, die jedes Ticket durchläuft. Für jedes Ticket identisch.
-_Avoid_: Workflow, Pipeline
+**Ticket flow**:
+The fixed sequence of steps every ticket goes through. Identical for every ticket.
+_Avoid_: Workflow, Pipeline, Ticket-Ablauf (former German term)
 
 **Check**:
-Eine deterministische Prüfung (Typen, Lint, Tests), die ein Ticket bestehen muss, bevor es als erledigt gilt.
-_Avoid_: Gate, Validierung
+A deterministic verification (types, lint, tests) a ticket must pass before it counts as done.
+_Avoid_: Gate, Validation
 
-**Projekt-Konfiguration**:
-Die Einstellungen, die ein Projekt für alle seine Läufe festlegt.
-_Avoid_: Repo-Konfiguration, Config, Settings
+**Verification**:
+One of the conditions by which the engine decides after a session whether an attempt is green: session successful, `HEAD` on the ticket branch, a new commit, clean working tree, plus every check.
+_Avoid_: Test, Gate, Prüfung (former German term)
 
-**Integration-Branch**:
-Der Branch, auf dem die Arbeit aller Tickets einer Spec zusammenläuft.
-_Avoid_: Feature-Branch
+**Project config**:
+The settings a project fixes for all of its runs.
+_Avoid_: repo config, Settings, Projekt-Konfiguration (former German term)
 
-**Ticket-Branch**:
-Der Branch, auf dem die Arbeit an genau einem Ticket entsteht. Er zweigt vom Integration-Branch ab und fließt erst dorthin zurück, wenn das Ticket seine Checks bestanden hat.
-_Avoid_: Feature-Branch, Arbeits-Branch
+**Integration branch**:
+The branch on which the work of all tickets of a spec comes together.
+_Avoid_: Feature branch, Integration-Branch (former German spelling)
 
-**Ziel-Branch**:
-Der Branch, in den die Engine den Integration-Branch am Ende eines Laufs mergen darf.
-_Avoid_: Base-Branch
+**Ticket branch**:
+The branch on which the work on exactly one ticket happens. It branches off the integration branch and only flows back there once the ticket has passed its checks.
+_Avoid_: Feature branch, work branch, Ticket-Branch (former German spelling)
 
-**Abschluss**:
-Was am Ende eines Laufs mit dem Integration-Branch geschieht, sobald alle Tickets der Spec geschlossen sind: Merge in den Ziel-Branch, PR oder nichts. Ein Mensch wählt ihn vor dem Lauf.
-_Avoid_: Finalisierung, Merge-Modus
+**Target branch**:
+The branch into which the engine may merge the integration branch at the end of a run.
+_Avoid_: Base branch, Ziel-Branch (former German term)
+
+**Finish**:
+What happens to the integration branch at the end of a run once all tickets of the spec are closed: merge into the target branch, PR or nothing (`merge`, `pr`, `none`). A human chooses it before the run.
+_Avoid_: Finalization, merge mode, Abschluss (former German term)

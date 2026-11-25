@@ -1,0 +1,30 @@
+{
+  "name": "groundhog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "groundhog": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check",
+    "test": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.9",
+    "@types/node": "^24.19.4",
+    "@vitest/coverage-v8": "^5.1.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
+    "@clack/prompts": "^1.9.0",
+    "emphasize": "^7.0.0"
+  }
+}
