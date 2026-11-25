@@ -49,9 +49,9 @@ const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-ohne-skills.jsonl' }
 
 const KONFIGURATION = {
   checks: ['npm ci', 'npm test'],
-  versuche: 4,
-  zielBranches: ['main', 'develop'],
-  sandbox: { hosts: [], aus: false },
+  attempts: 4,
+  targetBranches: ['main', 'develop'],
+  sandbox: { hosts: [], off: false },
 }
 
 /**
@@ -147,7 +147,7 @@ test('das Menü zeigt den Lauf, fragt Ziel-Branch und Abschluss und sagt, dass k
   expect(ergebnis.auswahl).toEqual({ zielBranch: 'develop', abschluss: 'mergen' })
   expect(ergebnis.token).toBe('gho_geheim')
   expect(ergebnis.repoUrl).toBe('https://github.com/lucas-devries/groundhog')
-  expect(ergebnis.konfiguration.versuche).toBe(4)
+  expect(ergebnis.konfiguration.attempts).toBe(4)
   expect(ergebnis.versionen).toEqual({
     claude: '2.1.0 (Claude Code)',
     'mattpocock-skills': '1.3.2',
@@ -182,7 +182,7 @@ test('der Start legt den Ordner des Protokolls vor dem Menü an', async () => {
   const { ergebnis } = await start({ klon, pfad }, ['main', 'pr'])
 
   if (!ergebnis.ok) throw new Error(ergebnis.meldung)
-  expect(ergebnis.protokoll.pfad).toMatch(/\.git\/groundhog\/laeufe\/\d{8}-\d{6}-spec-25$/)
+  expect(ergebnis.protokoll.pfad).toMatch(/\.git\/groundhog\/runs\/\d{8}-\d{6}-spec-25$/)
   expect(existsSync(ergebnis.protokoll.pfad)).toBe(true)
 })
 
@@ -262,7 +262,7 @@ test('Strg+C im Menü bricht mit Exit-Code 130 ab und gibt die Sperre frei', asy
 })
 
 test('bei abgeschalteter Sandbox warnt das Menü, und der Lauf bekommt keine Sandbox', async () => {
-  const { klon, pfad } = bereit({ konfiguration: { ...KONFIGURATION, sandbox: { aus: true } } })
+  const { klon, pfad } = bereit({ konfiguration: { ...KONFIGURATION, sandbox: { off: true } } })
   const sandboxFehlt = vi.fn(() => ['nie gefragt'])
 
   const { ergebnis, gezeigt } = await start({ klon, pfad }, ['develop', 'pr'], { sandboxFehlt })
@@ -460,7 +460,7 @@ const FAELLE: Fall[] = [
   },
   {
     grund: 'die Projekt-Konfiguration ist ungültig',
-    bereit: { konfiguration: { checks: [], zielBranches: ['main'], extra: 1 } },
+    bereit: { konfiguration: { checks: [], targetBranches: ['main'], extra: 1 } },
     meldung: ['checks: mindestens ein Eintrag nötig', 'unbekannter Schlüssel: extra'],
   },
   {
@@ -486,7 +486,7 @@ const FAELLE: Fall[] = [
   },
   {
     grund: 'ein Ziel-Branch auf dem Remote fehlt',
-    bereit: { konfiguration: { ...KONFIGURATION, zielBranches: ['main', 'release'] } },
+    bereit: { konfiguration: { ...KONFIGURATION, targetBranches: ['main', 'release'] } },
     meldung: ['Ziel-Branch fehlt auf dem Remote: release'],
   },
   {

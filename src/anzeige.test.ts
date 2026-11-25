@@ -199,7 +199,7 @@ test('am Ende stehen die Übersicht, der Stand des Integration-Branch, der Absch
         { art: 'ticket-erledigt', ticket: 26, commit: 'abcdef1234567890', versuche: 1, zeit: 0 },
         beendet({ art: 'entfaellt', grund: 'Tickets offen' }),
       ],
-      { protokoll: '/repo/.git/groundhog/laeufe/x' },
+      { protokoll: '/repo/.git/groundhog/runs/x' },
     )
       .split('\n')
       .slice(3),
@@ -211,8 +211,8 @@ test('am Ende stehen die Übersicht, der Stand des Integration-Branch, der Absch
     '',
     'Integration-Branch spec/25: 1 Ticket übernommen, Stand abcdef1',
     'Abschluss PR entfällt, weil Tickets offen sind. Nächster Lauf: groundhog 25',
-    `Rechner: ${hostname()} · Protokoll: /repo/.git/groundhog/laeufe/x`,
-    'Übersicht: /repo/.git/groundhog/laeufe/x/uebersicht.md',
+    `Rechner: ${hostname()} · Protokoll: /repo/.git/groundhog/runs/x`,
+    'Übersicht: /repo/.git/groundhog/runs/x/summary.md',
   ])
 })
 

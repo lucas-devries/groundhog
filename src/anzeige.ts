@@ -121,7 +121,7 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
           `Integration-Branch ${integration}: ${tickets}`,
           a.art === 'konflikt' ? s.rot(abschluss) : abschluss,
           s.matt(`Rechner: ${hostname()}${protokoll ? ` · Protokoll: ${protokoll}` : ''}`),
-          ...(protokoll ? [`Übersicht: ${join(protokoll, 'uebersicht.md')}`] : []),
+          ...(protokoll ? [`Übersicht: ${join(protokoll, 'summary.md')}`] : []),
         ]
       }
       default:

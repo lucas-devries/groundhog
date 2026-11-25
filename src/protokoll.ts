@@ -14,7 +14,7 @@ export interface Protokoll {
 }
 
 /**
- * Legt den Ordner des Laufs unter `.git/groundhog/laeufe/` an und löscht Läufe über die
+ * Legt den Ordner des Laufs unter `.git/groundhog/runs/` an und löscht Läufe über die
  * letzten 10 hinaus. Wirft, wenn der Ordner sich nicht anlegen lässt.
  */
 export function oeffneProtokoll(optionen: {
@@ -28,7 +28,7 @@ export function oeffneProtokoll(optionen: {
 }): Protokoll {
   const { verzeichnis, spec, start, weiter } = optionen
   const gitDir = resolve(verzeichnis, git(verzeichnis, 'rev-parse', '--git-common-dir'))
-  const laeufe = join(gitDir, 'groundhog', 'laeufe')
+  const laeufe = join(gitDir, 'groundhog', 'runs')
   const pfad = join(laeufe, `${zeitstempel(new Date(start))}-spec-${spec}`)
   mkdirSync(laeufe, { recursive: true })
   mkdirSync(pfad)
@@ -55,10 +55,10 @@ export function oeffneProtokoll(optionen: {
   }
   const protokolliere = (e: Ereignis) => {
     if (e.art === 'run-ausgabe') {
-      schreibe(`ticket-${e.ticket}-run-${e.run}.jsonl`, `${e.zeile}\n`, e.zeit)
+      schreibe(`ticket-${e.ticket}-session-${e.run}.jsonl`, `${e.zeile}\n`, e.zeit)
       return
     }
-    if (e.art === 'run-beendet') letzterRun = `ticket-${e.ticket}-run-${e.run}`
+    if (e.art === 'run-beendet') letzterRun = `ticket-${e.ticket}-session-${e.run}`
     if (e.art === 'pruefung' && e.ausgabe !== undefined) {
       const { ausgabe, befehl, ...ohneAusgabe } = e
       const text = `$ ${befehl}\n${ausgabe}${ausgabe.endsWith('\n') ? '' : '\n'}`
@@ -67,10 +67,10 @@ export function oeffneProtokoll(optionen: {
     }
     if (e.art === 'lauf-beendet') {
       const { uebersicht, ...ohneUebersicht } = e
-      schreibe('uebersicht.md', `${uebersicht}\n`, e.zeit)
+      schreibe('summary.md', `${uebersicht}\n`, e.zeit)
       e = ohneUebersicht as Ereignis
     }
-    schreibe('lauf.jsonl', `${JSON.stringify(e)}\n`, e.zeit)
+    schreibe('run.jsonl', `${JSON.stringify(e)}\n`, e.zeit)
   }
 
   return {

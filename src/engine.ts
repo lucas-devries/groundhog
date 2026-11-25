@@ -53,7 +53,7 @@ type LaufEreignis =
   /** Der Task-Graph, wie die Engine ihn vor jedem Ticket und am Ende gelesen hat. */
   | { art: 'task-graph'; tickets: GraphTicket[] }
   | { art: 'push'; branch: string; commit: string }
-  /** `uebersicht` als Markdown; das Protokoll legt sie als `uebersicht.md` ab. */
+  /** `uebersicht` als Markdown; das Protokoll legt sie als `summary.md` ab. */
   | { art: 'lauf-beendet'; abschluss: AbschlussErgebnis; uebersicht: string }
   | { art: 'warnung'; text: string }
 

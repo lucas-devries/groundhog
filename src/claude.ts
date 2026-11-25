@@ -9,7 +9,7 @@ export interface ClaudeOptionen {
   /** Das `gh`-Token der Engine; der Run bekommt es als `GH_TOKEN`. */
   token: string
   /**
-   * Die Sandbox um den ganzen `claude`-Prozess jedes Runs; `undefined` nur bei `sandbox.aus`. Davon
+   * Die Sandbox um den ganzen `claude`-Prozess jedes Runs; `undefined` nur bei `sandbox.off`. Davon
    * hängt der Permission-Modus ab: Bypass nur in der Sandbox, sonst Auto-Mode. Bypass ohne Sandbox
    * gibt es nicht.
    */

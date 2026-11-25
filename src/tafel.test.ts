@@ -208,7 +208,7 @@ test('im Terminal: alternativer Bildschirm, neu gezeichnet bei Ereignis und Grö
     rows: 6,
     write: (t: string) => geschrieben.push(t),
   }) as unknown as NodeJS.WriteStream
-  const { melde } = zeigeTafel(out, '/repo/.git/groundhog/laeufe/x')
+  const { melde } = zeigeTafel(out, '/repo/.git/groundhog/runs/x')
   expect(geschrieben.shift()).toBe('\x1b[?1049h\x1b[?25l\x1b[?7l')
 
   melde(begonnen)
@@ -222,9 +222,9 @@ test('im Terminal: alternativer Bildschirm, neu gezeichnet bei Ereignis und Grö
   melde({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, uebersicht: '# Übersicht', zeit: 0 })
   expect(geschrieben[0]).toBe('\x1b[?7h\x1b[?25h\x1b[?1049l')
   expect(geschrieben).toContain('# Übersicht\n')
-  expect(geschrieben.at(-1)).toBe('Übersicht: /repo/.git/groundhog/laeufe/x/uebersicht.md\n')
+  expect(geschrieben.at(-1)).toBe('Übersicht: /repo/.git/groundhog/runs/x/summary.md\n')
 
   // Danach zeichnet nichts mehr über den Schluss.
   out.emit('resize')
-  expect(geschrieben.at(-1)).toBe('Übersicht: /repo/.git/groundhog/laeufe/x/uebersicht.md\n')
+  expect(geschrieben.at(-1)).toBe('Übersicht: /repo/.git/groundhog/runs/x/summary.md\n')
 })

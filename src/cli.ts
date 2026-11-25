@@ -105,12 +105,12 @@ async function lauf(spec: number): Promise<number> {
       auswahl: start.auswahl,
       verzeichnis,
       checks: konfiguration.checks,
-      maxVersuche: konfiguration.versuche,
+      maxVersuche: konfiguration.attempts,
       token,
       versionen: { groundhog: VERSION, ...start.versionen },
       protokoll: protokoll.pfad,
       tracker: start.tracker,
-      // Dieselbe Sandbox um Runs und Checks; ohne sie kein Bypass (sandbox.aus).
+      // Dieselbe Sandbox um Runs und Checks; ohne sie kein Bypass (sandbox.off).
       agent: claudeAgent({ repoUrl: start.repoUrl, token, sandbox: start.sandbox }),
       sandbox: start.sandbox ?? durchreiche,
       uhr: systemUhr,

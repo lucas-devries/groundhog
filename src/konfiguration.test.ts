@@ -23,13 +23,13 @@ test('eine fehlende Datei verweist auf groundhog init', () => {
 })
 
 test('nur die Pflichtfelder ergeben die Defaults der übrigen', () => {
-  expect(leseKonfiguration(mitDatei('{"checks":["npm test"],"zielBranches":["main"]}'))).toEqual({
+  expect(leseKonfiguration(mitDatei('{"checks":["npm test"],"targetBranches":["main"]}'))).toEqual({
     ok: true,
     konfiguration: {
       checks: ['npm test'],
-      versuche: 3,
-      zielBranches: ['main'],
-      sandbox: { hosts: [], aus: false },
+      attempts: 3,
+      targetBranches: ['main'],
+      sandbox: { hosts: [], off: false },
     },
   })
 })
@@ -37,9 +37,9 @@ test('nur die Pflichtfelder ergeben die Defaults der übrigen', () => {
 test('alle Felder gesetzt werden übernommen', () => {
   const datei = {
     checks: ['npm ci', 'npm test'],
-    versuche: 10,
-    zielBranches: ['develop', 'main'],
-    sandbox: { hosts: ['*.example.com'], aus: true },
+    attempts: 10,
+    targetBranches: ['develop', 'main'],
+    sandbox: { hosts: ['*.example.com'], off: true },
   }
 
   expect(leseKonfiguration(mitDatei(JSON.stringify(datei)))).toEqual({
@@ -62,13 +62,13 @@ test('kein Objekt', () => {
 })
 
 test('fehlende Pflichtfelder', () => {
-  expect(fehlerVon({})).toEqual(['checks fehlt', 'zielBranches fehlt'])
+  expect(fehlerVon({})).toEqual(['checks fehlt', 'targetBranches fehlt'])
 })
 
 test('leere Listen', () => {
-  expect(fehlerVon({ checks: [], zielBranches: [] })).toEqual([
+  expect(fehlerVon({ checks: [], targetBranches: [] })).toEqual([
     'checks: mindestens ein Eintrag nötig',
-    'zielBranches: mindestens ein Eintrag nötig',
+    'targetBranches: mindestens ein Eintrag nötig',
   ])
 })
 
@@ -76,42 +76,42 @@ test('falsche Typen', () => {
   expect(
     fehlerVon({
       checks: 'npm test',
-      versuche: '3',
-      zielBranches: ['main', 1],
-      sandbox: { hosts: 'a.com', aus: 'nein' },
+      attempts: '3',
+      targetBranches: ['main', 1],
+      sandbox: { hosts: 'a.com', off: 'nein' },
     }),
   ).toEqual([
     'checks: Liste von Strings erwartet',
-    'versuche: ganze Zahl von 1 bis 10 erwartet',
-    'zielBranches: Liste von Strings erwartet',
+    'attempts: ganze Zahl von 1 bis 10 erwartet',
+    'targetBranches: Liste von Strings erwartet',
     'sandbox.hosts: Liste von Strings erwartet',
-    'sandbox.aus: true oder false erwartet',
+    'sandbox.off: true oder false erwartet',
   ])
-  expect(fehlerVon({ checks: ['x'], zielBranches: ['main'], sandbox: [] })).toEqual([
+  expect(fehlerVon({ checks: ['x'], targetBranches: ['main'], sandbox: [] })).toEqual([
     'sandbox: Objekt erwartet',
   ])
 })
 
-test('versuche außerhalb von 1 bis 10 oder keine ganze Zahl', () => {
-  for (const versuche of [0, 11, 2.5]) {
-    expect(fehlerVon({ checks: ['x'], zielBranches: ['main'], versuche })).toEqual([
-      'versuche: ganze Zahl von 1 bis 10 erwartet',
+test('attempts außerhalb von 1 bis 10 oder keine ganze Zahl', () => {
+  for (const attempts of [0, 11, 2.5]) {
+    expect(fehlerVon({ checks: ['x'], targetBranches: ['main'], attempts })).toEqual([
+      'attempts: ganze Zahl von 1 bis 10 erwartet',
     ])
   }
 })
 
 test('unbekannte Schlüssel, auch in sandbox', () => {
   expect(
-    fehlerVon({ checks: ['x'], zielBranches: ['main'], versuch: 3, sandbox: { host: [] } }),
-  ).toEqual(['unbekannter Schlüssel: versuch', 'unbekannter Schlüssel: sandbox.host'])
+    fehlerVon({ checks: ['x'], targetBranches: ['main'], attempt: 3, sandbox: { host: [] } }),
+  ).toEqual(['unbekannter Schlüssel: attempt', 'unbekannter Schlüssel: sandbox.host'])
 })
 
 test('alle Fehler auf einmal', () => {
-  expect(fehlerVon({ checks: [], versuche: 0, sandbox: { aus: 1 }, ziel: 'main' })).toEqual([
+  expect(fehlerVon({ checks: [], attempts: 0, sandbox: { off: 1 }, ziel: 'main' })).toEqual([
     'checks: mindestens ein Eintrag nötig',
-    'versuche: ganze Zahl von 1 bis 10 erwartet',
-    'zielBranches fehlt',
-    'sandbox.aus: true oder false erwartet',
+    'attempts: ganze Zahl von 1 bis 10 erwartet',
+    'targetBranches fehlt',
+    'sandbox.off: true oder false erwartet',
     'unbekannter Schlüssel: ziel',
   ])
 })

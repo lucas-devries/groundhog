@@ -61,8 +61,8 @@ test('init legt groundhog.json mit allen Feldern an, schreibt sonst nichts und n
     "npm test",
     "npm run lint"
   ],
-  "versuche": 5,
-  "zielBranches": [
+  "attempts": 5,
+  "targetBranches": [
     "main",
     "develop"
   ],
@@ -71,7 +71,7 @@ test('init legt groundhog.json mit allen Feldern an, schreibt sonst nichts und n
       "a.com",
       "b.com"
     ],
-    "aus": false
+    "off": false
   }
 }
 `,
@@ -105,7 +105,7 @@ test('init stellt vier Fragen: Checks, Ziel-Branches mit Default-Branch vorn, Ho
     expect.objectContaining({ art: 'text', initialValue: '' }),
     expect.objectContaining({ art: 'text', initialValue: '3' }),
   ])
-  expect(JSON.parse(datei(klon))).toMatchObject({ versuche: 3, sandbox: { hosts: [] } })
+  expect(JSON.parse(datei(klon))).toMatchObject({ attempts: 3, sandbox: { hosts: [] } })
 })
 
 test('Checks brauchen mindestens einen Befehl, Versuche eine ganze Zahl von 1 bis 10', async () => {
@@ -113,13 +113,13 @@ test('Checks brauchen mindestens einen Befehl, Versuche eine ganze Zahl von 1 bi
   await starte(githubKlon(), dialog)
   type Pruefe = { validate: (wert: string) => string | undefined }
   const checks = gezeigt[0] as Pruefe
-  const versuche = gezeigt[4] as Pruefe
+  const attempts = gezeigt[4] as Pruefe
 
   expect(checks.validate(' \n ')).toBeDefined()
   expect(checks.validate('npm test')).toBeUndefined()
   for (const falsch of ['', '0', '11', '2.5', 'drei'])
-    expect(versuche.validate(falsch)).toBeDefined()
-  for (const gut of ['1', '10', ' 4 ']) expect(versuche.validate(gut)).toBeUndefined()
+    expect(attempts.validate(falsch)).toBeDefined()
+  for (const gut of ['1', '10', ' 4 ']) expect(attempts.validate(gut)).toBeUndefined()
 })
 
 test('die Reihenfolge der Ziel-Branches folgt der Liste, nicht der Auswahl', async () => {
@@ -128,7 +128,7 @@ test('die Reihenfolge der Ziel-Branches folgt der Liste, nicht der Auswahl', asy
 
   await starte(klon, dialog)
 
-  expect(JSON.parse(datei(klon)).zielBranches).toEqual(['main', 'develop'])
+  expect(JSON.parse(datei(klon)).targetBranches).toEqual(['main', 'develop'])
 })
 
 test.each([
@@ -168,15 +168,15 @@ test('Strg+C bei jeder Frage schreibt nichts', async () => {
   }
 })
 
-test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.aus bleibt erhalten', async () => {
+test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.off bleibt erhalten', async () => {
   const klon = githubKlon()
   writeFileSync(
     join(klon, 'groundhog.json'),
     JSON.stringify({
       checks: ['make test', 'make lint'],
-      versuche: 7,
-      zielBranches: ['develop', 'main'],
-      sandbox: { hosts: ['x.com', 'y.com'], aus: true },
+      attempts: 7,
+      targetBranches: ['develop', 'main'],
+      sandbox: { hosts: ['x.com', 'y.com'], off: true },
     }),
   )
   const { dialog, gezeigt } = fakeDialog(['make test', ['main', 'develop'], 'x.com', '7'])
@@ -199,9 +199,9 @@ test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.aus bleibt erhalten'
   ])
   expect(JSON.parse(datei(klon))).toEqual({
     checks: ['make test'],
-    versuche: 7,
-    zielBranches: ['develop', 'main'],
-    sandbox: { hosts: ['x.com'], aus: true },
+    attempts: 7,
+    targetBranches: ['develop', 'main'],
+    sandbox: { hosts: ['x.com'], off: true },
   })
 })
 

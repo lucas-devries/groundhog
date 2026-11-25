@@ -7,9 +7,9 @@ export const VERSUCHE_STANDARD = 3
 /** Die Projekt-Konfiguration, `groundhog.json` im Repo-Root. */
 export interface Konfiguration {
   checks: string[]
-  versuche: number
-  zielBranches: string[]
-  sandbox: { hosts: string[]; aus: boolean }
+  attempts: number
+  targetBranches: string[]
+  sandbox: { hosts: string[]; off: boolean }
 }
 
 export type Gelesen =
@@ -57,24 +57,24 @@ export function leseKonfiguration(verzeichnis: string): Gelesen {
   }
 
   const checks = liste('checks', roh.checks, true)
-  const versuche = roh.versuche ?? VERSUCHE_STANDARD
-  if (!Number.isInteger(versuche) || (versuche as number) < 1 || (versuche as number) > 10) {
-    fehler.push('versuche: ganze Zahl von 1 bis 10 erwartet')
+  const attempts = roh.attempts ?? VERSUCHE_STANDARD
+  if (!Number.isInteger(attempts) || (attempts as number) < 1 || (attempts as number) > 10) {
+    fehler.push('attempts: ganze Zahl von 1 bis 10 erwartet')
   }
-  const zielBranches = liste('zielBranches', roh.zielBranches, true)
+  const targetBranches = liste('targetBranches', roh.targetBranches, true)
   let sandbox: Record<string, unknown> = {}
   if (roh.sandbox !== undefined) {
     if (istObjekt(roh.sandbox)) sandbox = roh.sandbox
     else fehler.push('sandbox: Objekt erwartet')
   }
   const hosts = liste('sandbox.hosts', sandbox.hosts, false)
-  const aus = sandbox.aus ?? false
-  if (typeof aus !== 'boolean') fehler.push('sandbox.aus: true oder false erwartet')
+  const off = sandbox.off ?? false
+  if (typeof off !== 'boolean') fehler.push('sandbox.off: true oder false erwartet')
 
-  for (const k of unbekannt(roh, ['checks', 'versuche', 'zielBranches', 'sandbox'])) {
+  for (const k of unbekannt(roh, ['checks', 'attempts', 'targetBranches', 'sandbox'])) {
     fehler.push(`unbekannter Schlüssel: ${k}`)
   }
-  for (const k of unbekannt(sandbox, ['hosts', 'aus'])) {
+  for (const k of unbekannt(sandbox, ['hosts', 'off'])) {
     fehler.push(`unbekannter Schlüssel: sandbox.${k}`)
   }
 
@@ -83,9 +83,9 @@ export function leseKonfiguration(verzeichnis: string): Gelesen {
     ok: true,
     konfiguration: {
       checks,
-      versuche: versuche as number,
-      zielBranches,
-      sandbox: { hosts, aus: aus as boolean },
+      attempts: attempts as number,
+      targetBranches,
+      sandbox: { hosts, off: off as boolean },
     },
   }
 }

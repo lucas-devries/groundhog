@@ -60,8 +60,8 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
 
   const pfad = await lauf(klon, [commitet])
 
-  expect(pfad).toBe(join(klon, '.git/groundhog/laeufe/20261125-030405-spec-1'))
-  const ereignisse = zeilen(join(pfad, 'lauf.jsonl'))
+  expect(pfad).toBe(join(klon, '.git/groundhog/runs/20261125-030405-spec-1'))
+  const ereignisse = zeilen(join(pfad, 'run.jsonl'))
   expect(ereignisse.map((e) => e.art)).toEqual([
     'lauf-begonnen',
     'task-graph',
@@ -109,7 +109,7 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
   expect(ereignisse[14]).toEqual({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, zeit: START })
 })
 
-test('die Übersicht liegt als uebersicht.md im Ordner des Laufs, wie die Engine sie meldet', async () => {
+test('die Übersicht liegt als summary.md im Ordner des Laufs, wie die Engine sie meldet', async () => {
   const { klon } = wegwerfRepo()
   let gemeldet = ''
 
@@ -119,7 +119,7 @@ test('die Übersicht liegt als uebersicht.md im Ordner des Laufs, wie die Engine
     },
   })
 
-  expect(readFileSync(join(pfad, 'uebersicht.md'), 'utf8')).toBe(`${gemeldet}\n`)
+  expect(readFileSync(join(pfad, 'summary.md'), 'utf8')).toBe(`${gemeldet}\n`)
   expect(gemeldet).toMatch(/^# Übersicht Spec #1\n/)
 })
 
@@ -144,22 +144,24 @@ test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks da
   )
 
   expect(readdirSync(pfad).sort()).toEqual([
-    'lauf.jsonl',
-    'ticket-2-run-1-checks.log',
-    'ticket-2-run-1.jsonl',
-    'ticket-2-run-2-checks.log',
-    'ticket-2-run-2.jsonl',
-    'uebersicht.md',
+    'run.jsonl',
+    'summary.md',
+    'ticket-2-session-1-checks.log',
+    'ticket-2-session-1.jsonl',
+    'ticket-2-session-2-checks.log',
+    'ticket-2-session-2.jsonl',
   ])
-  expect(readFileSync(join(pfad, 'ticket-2-run-1.jsonl'), 'utf8')).toBe(
+  expect(readFileSync(join(pfad, 'ticket-2-session-1.jsonl'), 'utf8')).toBe(
     '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n',
   )
-  const checks1 = readFileSync(join(pfad, 'ticket-2-run-1-checks.log'), 'utf8')
+  const checks1 = readFileSync(join(pfad, 'ticket-2-session-1-checks.log'), 'utf8')
   expect(checks1).toContain('$ echo vorher\nvorher\n')
   expect(checks1).toContain('zeile 0\n')
   expect(checks1).toContain('zeile 149')
-  expect(readFileSync(join(pfad, 'ticket-2-run-2-checks.log'), 'utf8')).not.toContain('zeile 0\n')
-  const ereignisse = zeilen(join(pfad, 'lauf.jsonl'))
+  expect(readFileSync(join(pfad, 'ticket-2-session-2-checks.log'), 'utf8')).not.toContain(
+    'zeile 0\n',
+  )
+  const ereignisse = zeilen(join(pfad, 'run.jsonl'))
   expect(ereignisse.filter((e) => e.art === 'run-beendet')).toMatchObject([
     { run: 1, versuch: 1 },
     { run: 2, versuch: 2 },
@@ -196,15 +198,15 @@ test('das gh-Token erscheint weder im Protokoll noch in der Rückmeldung an den 
     .join('\n')
   expect(alles).not.toContain('ghp_geheim')
   expect(zurueck).toBe('{"text":"GH_TOKEN=***"}')
-  expect(readFileSync(join(pfad, 'ticket-2-run-1.jsonl'), 'utf8')).toContain('GH_TOKEN=***')
-  expect(readFileSync(join(pfad, 'ticket-2-run-1-checks.log'), 'utf8')).toContain('token ***')
+  expect(readFileSync(join(pfad, 'ticket-2-session-1.jsonl'), 'utf8')).toContain('GH_TOKEN=***')
+  expect(readFileSync(join(pfad, 'ticket-2-session-1-checks.log'), 'utf8')).toContain('token ***')
   expect(rueckmeldung).toContain('token ***')
   expect(rueckmeldung).not.toContain('ghp_geheim')
 })
 
 test('die letzten 10 Läufe bleiben, ältere löscht der Start des nächsten', async () => {
   const { klon } = wegwerfRepo()
-  const laeufe = join(klon, '.git/groundhog/laeufe')
+  const laeufe = join(klon, '.git/groundhog/runs')
   const alte = Array.from({ length: 10 }, (_, i) => `202611${10 + i}-120000-spec-${i}`)
   for (const alt of alte) mkdirSync(join(laeufe, alt), { recursive: true })
 

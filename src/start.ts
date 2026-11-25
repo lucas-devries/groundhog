@@ -61,7 +61,7 @@ export interface Bereit {
   /** Das `gh`-Token. */
   token: string
   repoUrl: string
-  /** Die `srt`-Sandbox; `undefined` nur bei `sandbox.aus`. */
+  /** Die `srt`-Sandbox; `undefined` nur bei `sandbox.off`. */
   sandbox: SrtSandbox | undefined
   versionen: Record<string, string>
   protokoll: Protokoll
@@ -165,7 +165,7 @@ export async function starte({
         `Es gibt einen Branch ${stoerend.join(', ')}. Er stört spec/* und ticket/*; benenne ihn um.`,
       )
     }
-    const fehlend = konfiguration.zielBranches.filter(
+    const fehlend = konfiguration.targetBranches.filter(
       (b) => !git(verzeichnis, 'for-each-ref', `refs/remotes/origin/${b}`),
     )
     if (fehlend.length > 0) {
@@ -188,7 +188,7 @@ export async function starte({
     }
 
     let sandbox: SrtSandbox | undefined
-    if (!konfiguration.sandbox.aus) {
+    if (!konfiguration.sandbox.off) {
       const was = fehlt()
       if (was.length > 0) {
         throw new Abbruch(
@@ -357,12 +357,12 @@ async function menue(
       `${tickets.length} Tickets, davon ${freigegeben.length} für den Agent freigegeben`,
       ...mensch.map((t) => `#${t.nummer}: ready-for-human, wird nicht angefasst`),
       `Checks: ${konfiguration.checks.join(' · ')}`,
-      `Sandbox: ${sandbox.aus ? 'aus' : 'an (srt)'}`,
-      `Versuche pro Ticket: ${konfiguration.versuche}`,
+      `Sandbox: ${sandbox.off ? 'aus' : 'an (srt)'}`,
+      `Versuche pro Ticket: ${konfiguration.attempts}`,
     ].join('\n'),
     'Dieser Lauf',
   )
-  if (sandbox.aus) {
+  if (sandbox.off) {
     dialog.warn(
       'Die Sandbox ist aus: Runs laufen im Auto-Mode ohne Grenzen auf diesem Rechner, mit deinem gh-Token.',
     )
@@ -370,8 +370,8 @@ async function menue(
   const zielBranch = antwort(
     await dialog.select({
       message: 'Ziel-Branch: Wohin fließt die Arbeit am Ende?',
-      options: konfiguration.zielBranches.map((b) => ({ value: b, label: b })),
-      initialValue: konfiguration.zielBranches[0] ?? '',
+      options: konfiguration.targetBranches.map((b) => ({ value: b, label: b })),
+      initialValue: konfiguration.targetBranches[0] ?? '',
     }),
   )
   const abschluss = antwort(

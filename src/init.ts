@@ -67,9 +67,9 @@ export async function init({
 
   let vorgabe: Konfiguration = {
     checks: nodeChecks(verzeichnis),
-    versuche: VERSUCHE_STANDARD,
-    zielBranches: [],
-    sandbox: { hosts: [], aus: false },
+    attempts: VERSUCHE_STANDARD,
+    targetBranches: [],
+    sandbox: { hosts: [], off: false },
   }
   const gelesen = leseKonfiguration(verzeichnis)
   if (gelesen.ok) vorgabe = gelesen.konfiguration
@@ -100,16 +100,16 @@ export async function init({
     .map((z) => z.split('\trefs/heads/')[1])
     .filter((b): b is string => b !== undefined)
     .sort()
-  const vorn = vorgabe.zielBranches.filter((b) => remote.includes(b))
+  const vorn = vorgabe.targetBranches.filter((b) => remote.includes(b))
   if (vorn.length === 0 && standard !== undefined) vorn.push(standard)
   const reihenfolge = [...new Set([...vorn, ...remote])]
-  const zielBranches = await dialog.multiselect({
+  const targetBranches = await dialog.multiselect({
     message: 'Ziel-Branches: wohin darf ein Lauf mergen? Der erste ist die Vorauswahl.',
     options: reihenfolge.map((b) => ({ value: b, label: b })),
     initialValues: vorn,
     required: true,
   })
-  if (typeof zielBranches === 'symbol') return STRG_C
+  if (typeof targetBranches === 'symbol') return STRG_C
 
   dialog.info(`Die Sandbox erreicht immer: ${FESTE_HOSTS.join(', ')}`)
   const hosts = await dialog.text({
@@ -120,21 +120,21 @@ export async function init({
 
   const versuche = await dialog.text({
     message: 'Versuche pro Ticket (1 bis 10)',
-    initialValue: String(vorgabe.versuche),
+    initialValue: String(vorgabe.attempts),
     validate: (w) => (gueltigeVersuche(w) ? undefined : 'Eine ganze Zahl von 1 bis 10.'),
   })
   if (typeof versuche === 'symbol') return STRG_C
 
   const konfiguration: Konfiguration = {
     checks: zeilen(checks),
-    versuche: Number(versuche),
-    zielBranches: reihenfolge.filter((b) => zielBranches.includes(b)),
+    attempts: Number(versuche),
+    targetBranches: reihenfolge.filter((b) => targetBranches.includes(b)),
     sandbox: {
       hosts: hosts
         .split(',')
         .map((h) => h.trim())
         .filter(Boolean),
-      aus: vorgabe.sandbox.aus,
+      off: vorgabe.sandbox.off,
     },
   }
   writeFileSync(join(verzeichnis, DATEI), `${JSON.stringify(konfiguration, null, 2)}\n`)

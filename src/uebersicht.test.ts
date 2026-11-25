@@ -34,7 +34,7 @@ async function lauf(
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
     verzeichnis: klon,
     checks: ['grep -sqx gruen gruen || { echo "nicht gruen"; false; }'],
-    protokoll: '/tmp/laeufe/20261125-220000-spec-1',
+    protokoll: '/tmp/runs/20261125-220000-spec-1',
     tracker,
     agent: fakeAgent(
       skript.map((schritt) => (auftrag) => {
@@ -114,7 +114,7 @@ Blocks: 2
 
 - Session: \`claude --resume sitzung-2-rot\`
 - Rechner: ${hostname()}
-- Protokoll: \`/tmp/laeufe/20261125-220000-spec-1\``,
+- Protokoll: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
   expect(tracker.ticket(2)).toMatchObject({ labels: ['ready-for-human'], assignees: [] })
 })
@@ -189,7 +189,7 @@ test('die Übersicht nennt den Lauf und je Ticket eine Zeile; die Spec bekommt s
     `${uebersicht}
 
 - Rechner: ${hostname()}
-- Protokoll: \`/tmp/laeufe/20261125-220000-spec-1\``,
+- Protokoll: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
 })
 
