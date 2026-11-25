@@ -48,8 +48,17 @@ export interface TicketErgebnis {
   pruefung?: string
 }
 
+/** Was aus dem Abschluss wurde. */
+export type AbschlussErgebnis =
+  | { art: 'gemergt'; commit: string }
+  | { art: 'konflikt' }
+  | { art: 'pr'; url: string }
+  | { art: 'nichts' }
+  | { art: 'entfaellt'; grund: 'Tickets offen' }
+
 export interface LaufErgebnis {
   tickets: TicketErgebnis[]
+  abschluss: AbschlussErgebnis
   /** Gesetzt, wenn der Lauf vorzeitig angehalten hat: Am Usage-Limit fehlt Guthaben. */
   angehalten?: 'guthaben'
 }
@@ -66,7 +75,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   const { spec, auswahl, verzeichnis, tracker, uhr, versuche = 3 } = eingabe
   const melde = (e: TicketEreignis) => eingabe.melde?.({ ...e, zeit: uhr.jetzt() })
   const integration = `spec/${spec}`
-  const ergebnis: LaufErgebnis = { tickets: [] }
+  const ergebnis: Omit<LaufErgebnis, 'abschluss'> = { tickets: [] }
 
   git(verzeichnis, 'fetch', '-q', 'origin')
   if (!branchExistiert(verzeichnis, integration)) {
@@ -74,10 +83,17 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   }
 
   while (true) {
-    const ticket = (await tracker.taskGraph(spec))
+    const graph = await tracker.taskGraph(spec)
+    const ticket = graph
       .filter((t) => bearbeitbar(t, tracker.nutzer))
       .sort((a, b) => a.nummer - b.nummer)[0]
-    if (!ticket) return ergebnis
+    if (!ticket) {
+      const abschluss = await schliesseAb(
+        eingabe,
+        graph.every((t) => !t.offen),
+      )
+      return { ...ergebnis, abschluss }
+    }
     const nr = ticket.nummer
     const ticketBranch = `ticket/${nr}`
 
@@ -156,7 +172,11 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
         if (run.usageLimit === 'guthaben') {
           // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
           melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
-          return { ...ergebnis, angehalten: 'guthaben' }
+          return {
+            ...ergebnis,
+            abschluss: { art: 'entfaellt', grund: 'Tickets offen' },
+            angehalten: 'guthaben',
+          }
         }
         let reset: number | undefined = run.usageLimit
         while (reset !== undefined) {
@@ -229,6 +249,49 @@ function kuerzeVonVorn(ausgabe: string): string {
   let gekuerzt = zeilen.slice(-100).join('\n').slice(-50_000)
   if (gekuerzt.length < ausgabe.trimEnd().length) gekuerzt = `[gekürzt]\n${gekuerzt}`
   return gekuerzt
+}
+
+/** Der Abschluss: nur wenn alle Tickets der Spec geschlossen sind, sonst bleibt der Integration-Branch stehen. */
+async function schliesseAb(
+  { spec, auswahl, verzeichnis, tracker }: LaufEingabe,
+  alleGeschlossen: boolean,
+): Promise<AbschlussErgebnis> {
+  if (!alleGeschlossen) return { art: 'entfaellt', grund: 'Tickets offen' }
+  const integration = `spec/${spec}`
+  const ziel = auswahl.zielBranch
+  switch (auswahl.abschluss) {
+    case 'mergen': {
+      git(verzeichnis, 'fetch', '-q', 'origin')
+      // Gemergt wird auf einem losgelösten HEAD, damit der lokale Ziel-Branch unberührt bleibt.
+      git(verzeichnis, 'checkout', '-q', '--detach', `origin/${ziel}`)
+      try {
+        git(verzeichnis, 'merge', '-q', '--no-ff', '--no-edit', integration)
+      } catch {
+        // Die Engine löst nie Konflikte.
+        git(verzeichnis, 'merge', '--abort')
+        git(verzeichnis, 'checkout', '-q', integration)
+        return { art: 'konflikt' }
+      }
+      const commit = git(verzeichnis, 'rev-parse', 'HEAD')
+      git(verzeichnis, 'push', '-q', 'origin', `HEAD:refs/heads/${ziel}`)
+      git(verzeichnis, 'checkout', '-q', integration)
+      await tracker.schliesse(spec)
+      return { art: 'gemergt', commit }
+    }
+    case 'pr': {
+      const url = await tracker.erstellePr({
+        kopf: integration,
+        basis: ziel,
+        titel: `Spec #${spec}`,
+        body: `Closes #${spec}`,
+      })
+      await tracker.kommentiere(spec, `PR: ${url}`)
+      return { art: 'pr', url }
+    }
+    case 'nichts':
+      await tracker.kommentiere(spec, `Integration-Branch: ${integration}`)
+      return { art: 'nichts' }
+  }
 }
 
 /** Gehört zur Frontier: Ein mir zugewiesenes Ticket ist der Rest eines abgebrochenen Laufs. */

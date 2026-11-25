@@ -1,0 +1,186 @@
+{
+  "data": {
+    "repository": {
+      "issue": {
+        "subIssues": {
+          "nodes": [
+            {
+              "number": 26,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [] }
+            },
+            {
+              "number": 27,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 26, "state": "OPEN" }] }
+            },
+            {
+              "number": 28,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 26, "state": "OPEN" }] }
+            },
+            {
+              "number": 29,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 28, "state": "OPEN" }] }
+            },
+            {
+              "number": 30,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 27, "state": "OPEN" }] }
+            },
+            {
+              "number": 31,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 26, "state": "OPEN" }] }
+            },
+            {
+              "number": 32,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 27, "state": "OPEN" }, { "number": 28, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 33,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 28, "state": "OPEN" }, { "number": 29, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 34,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 31, "state": "OPEN" }, { "number": 33, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 35,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [
+                  { "number": 33, "state": "OPEN" },
+                  { "number": 32, "state": "OPEN" },
+                  { "number": 34, "state": "OPEN" },
+                  { "number": 30, "state": "OPEN" },
+                  { "number": 31, "state": "OPEN" }
+                ]
+              }
+            },
+            {
+              "number": 36,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 35, "state": "OPEN" }] }
+            },
+            {
+              "number": 37,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 28, "state": "OPEN" }] }
+            },
+            {
+              "number": 38,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 37, "state": "OPEN" }, { "number": 30, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 39,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 33, "state": "OPEN" }] }
+            },
+            {
+              "number": 40,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 35, "state": "OPEN" }, { "number": 39, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 41,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [{ "number": 35, "state": "OPEN" }, { "number": 37, "state": "OPEN" }]
+              }
+            },
+            {
+              "number": 42,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 35, "state": "OPEN" }] }
+            },
+            {
+              "number": 43,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-agent" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": { "nodes": [{ "number": 35, "state": "OPEN" }] }
+            },
+            {
+              "number": 44,
+              "state": "OPEN",
+              "labels": { "nodes": [{ "name": "ready-for-human" }] },
+              "assignees": { "nodes": [] },
+              "blockedBy": {
+                "nodes": [
+                  { "number": 26, "state": "OPEN" },
+                  { "number": 42, "state": "OPEN" },
+                  { "number": 37, "state": "OPEN" },
+                  { "number": 34, "state": "OPEN" },
+                  { "number": 41, "state": "OPEN" },
+                  { "number": 28, "state": "OPEN" },
+                  { "number": 30, "state": "OPEN" },
+                  { "number": 38, "state": "OPEN" },
+                  { "number": 39, "state": "OPEN" },
+                  { "number": 32, "state": "OPEN" },
+                  { "number": 40, "state": "OPEN" },
+                  { "number": 36, "state": "OPEN" },
+                  { "number": 35, "state": "OPEN" },
+                  { "number": 31, "state": "OPEN" },
+                  { "number": 43, "state": "OPEN" },
+                  { "number": 27, "state": "OPEN" },
+                  { "number": 33, "state": "OPEN" },
+                  { "number": 29, "state": "OPEN" }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

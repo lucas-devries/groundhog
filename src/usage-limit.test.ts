@@ -118,7 +118,11 @@ test('verlangt ein Abbruch ohne Reset-Zeit Guthaben, hält die Engine den Lauf a
     { uhr },
   )
 
-  expect(ergebnis).toEqual({ tickets: [], angehalten: 'guthaben' })
+  expect(ergebnis).toEqual({
+    tickets: [],
+    abschluss: { art: 'entfaellt', grund: 'Tickets offen' },
+    angehalten: 'guthaben',
+  })
   expect(uhr.jetzt()).toBe(0)
   expect(ereignisse.map((e) => e.art)).toEqual([
     'ticket-genommen',
