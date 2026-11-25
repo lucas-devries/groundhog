@@ -1,7 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
+import { type AgentSkript, fakeAgent, type RunAuftrag } from './agent.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
 import { git } from './git.ts'
 import { durchreiche } from './sandbox.ts'
@@ -15,6 +15,7 @@ async function lauf(
   tracker: InMemoryTracker,
   skript: AgentSkript[],
   checks = ['true'],
+  versuche?: number,
 ): Promise<Ereignis[]> {
   const ereignisse: Ereignis[] = []
   await fahreLauf({
@@ -22,6 +23,7 @@ async function lauf(
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
     verzeichnis,
     checks,
+    versuche,
     tracker,
     agent: fakeAgent(skript),
     sandbox: durchreiche,
@@ -31,7 +33,10 @@ async function lauf(
   return ereignisse
 }
 
-const einTicket = () => new InMemoryTracker('ich', [{ nummer: 2, offen: true, assignees: [] }])
+const einTicket = () =>
+  new InMemoryTracker('ich', [
+    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'] },
+  ])
 
 const commitet: AgentSkript = ({ verzeichnis }) => {
   commitDatei(verzeichnis, 'a.txt', 'a', 'Ticket 2 umsetzen')
@@ -130,14 +135,34 @@ test.each<[string, AgentSkript]>([
       return { erfolg: true }
     },
   ],
-])('Prüfung „%s“ rot: Ticket bleibt offen, nichts gepusht, keine Checks', async (rot, schritt) => {
+])('Prüfung „%s“ rot im letzten Versuch: Ticket geht an einen Menschen', async (rot, schritt) => {
   const { remote, klon } = wegwerfRepo()
   const tracker = einTicket()
 
-  const ereignisse = await lauf(klon, tracker, [schritt], ['touch check-lief'])
+  const ereignisse = await lauf(
+    klon,
+    tracker,
+    [
+      (auftrag) => {
+        git(auftrag.verzeichnis, 'push', '-q', 'origin', 'ticket/2')
+        return schritt(auftrag)
+      },
+    ],
+    ['touch check-lief'],
+    1,
+  )
 
-  expect(tracker.ticket(2).offen).toBe(true)
+  expect(tracker.ticket(2)).toEqual({
+    nummer: 2,
+    offen: true,
+    assignees: [],
+    labels: ['ready-for-human'],
+  })
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
+  expect(git(klon, 'branch', '--list', 'ticket/*')).toBe('')
+  expect(git(remote, 'branch', '--list', 'ticket/*')).toBe('')
+  expect(git(klon, 'status', '--porcelain')).toBe('')
+  expect(git(klon, 'branch', '--show-current')).toBe('spec/1')
   const pruefungen = ereignisse.filter((e) => e.art === 'pruefung')
   expect(pruefungen.filter((p) => !p.ok).map((p) => p.name)).toEqual([rot])
   expect(existsSync(join(klon, 'check-lief'))).toBe(false)
@@ -152,6 +177,7 @@ test('Checks laufen in Reihenfolge im Repo-Root, beim ersten roten ist Schluss',
     tracker,
     [commitet],
     ['test -f a.txt', 'false', 'touch zu-weit'],
+    1,
   )
 
   expect(tracker.ticket(2).offen).toBe(true)
@@ -163,4 +189,192 @@ test('Checks laufen in Reihenfolge im Repo-Root, beim ersten roten ist Schluss',
     { name: 'Check: test -f a.txt', ok: true },
     { name: 'Check: false', ok: false },
   ])
+})
+
+test('ein roter Versuch bekommt einen frischen Run auf demselben Ticket-Branch mit der Check-Ausgabe', async () => {
+  const { remote, klon } = wegwerfRepo()
+  const tracker = einTicket()
+  const auftraege: RunAuftrag[] = []
+
+  await lauf(
+    klon,
+    tracker,
+    [
+      (auftrag) => {
+        auftraege.push(auftrag)
+        return commitet(auftrag)
+      },
+      (auftrag) => {
+        auftraege.push(auftrag)
+        commitDatei(auftrag.verzeichnis, 'b.txt', 'b', 'Test reparieren')
+        return { erfolg: true }
+      },
+    ],
+    ['test -f b.txt || { echo b.txt fehlt; exit 1; }'],
+  )
+
+  expect(tracker.ticket(2).offen).toBe(false)
+  expect(auftraege.map((a) => a.fixpunkt)).toEqual([
+    git(remote, 'rev-parse', 'main'),
+    git(remote, 'rev-parse', 'main'),
+  ])
+  expect(auftraege[0]?.rueckmeldung).toBeUndefined()
+  expect(auftraege[1]?.rueckmeldung).toContain('test -f b.txt')
+  expect(auftraege[1]?.rueckmeldung).toContain('b.txt fehlt')
+})
+
+test('ohne Angabe gibt es 3 Versuche; auch ein gescheiterter Run verbraucht einen', async () => {
+  const { klon } = wegwerfRepo()
+  const tracker = einTicket()
+  const rueckmeldungen: (string | undefined)[] = []
+  const merke: AgentSkript = (auftrag) => {
+    rueckmeldungen.push(auftrag.rueckmeldung)
+    return { erfolg: false }
+  }
+
+  const ereignisse = await lauf(klon, tracker, [() => ({ erfolg: true }), merke, merke, merke])
+
+  expect(rueckmeldungen).toHaveLength(2)
+  expect(rueckmeldungen[0]).toContain('neuer Commit seit Fixpunkt')
+  expect(rueckmeldungen[1]).toContain('Run erfolgreich')
+  expect(tracker.ticket(2).labels).toEqual(['ready-for-human'])
+  expect(ereignisse.filter((e) => e.art === 'versuch-begonnen')).toMatchObject([
+    { versuch: 1, von: 3 },
+    { versuch: 2, von: 3 },
+    { versuch: 3, von: 3 },
+  ])
+})
+
+test('ein Versuch, der den Ticket-Branch verlassen hat, macht auf dem Ticket-Branch weiter', async () => {
+  const { klon } = wegwerfRepo()
+  const tracker = einTicket()
+  let imZweitenRun: unknown
+
+  await lauf(klon, tracker, [
+    (auftrag) => {
+      commitet(auftrag)
+      git(auftrag.verzeichnis, 'checkout', '-q', '-b', 'woanders')
+      return { erfolg: true }
+    },
+    ({ verzeichnis }) => {
+      imZweitenRun = {
+        branch: git(verzeichnis, 'branch', '--show-current'),
+        log: git(verzeichnis, 'log', '--format=%s'),
+      }
+      return { erfolg: true }
+    },
+  ])
+
+  expect(imZweitenRun).toEqual({ branch: 'ticket/2', log: 'Ticket 2 umsetzen\ninit' })
+  expect(tracker.ticket(2).offen).toBe(false)
+})
+
+test('ein vorhandener Ticket-Branch wird beim ersten Versuch frisch abgezweigt', async () => {
+  const { remote, klon } = wegwerfRepo()
+  git(klon, 'checkout', '-q', '-b', 'ticket/2')
+  commitDatei(klon, 'alt.txt', 'alt', 'Rest eines alten Laufs')
+  git(klon, 'checkout', '-q', 'main')
+
+  await lauf(klon, einTicket(), [commitet])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
+})
+
+test('hat der Agent das Ticket in einem roten Versuch geschlossen, öffnet die Engine es wieder', async () => {
+  const { klon } = wegwerfRepo()
+  const tracker = einTicket()
+  let offenImZweitenRun: boolean | undefined
+
+  await lauf(
+    klon,
+    tracker,
+    [
+      async () => {
+        await tracker.schliesse(2)
+        return { erfolg: true }
+      },
+      async () => {
+        offenImZweitenRun = tracker.ticket(2).offen
+        await tracker.schliesse(2)
+        return { erfolg: true }
+      },
+    ],
+    undefined,
+    2,
+  )
+
+  expect(offenImZweitenRun).toBe(true)
+  expect(tracker.ticket(2)).toMatchObject({ offen: true, labels: ['ready-for-human'] })
+})
+
+test('nach einem gescheiterten Ticket geht es mit der restlichen Frontier weiter', async () => {
+  const { remote, klon } = wegwerfRepo()
+  const tracker = new InMemoryTracker('ich', [
+    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'] },
+    { nummer: 3, offen: true, assignees: [], labels: ['ready-for-agent'] },
+  ])
+
+  const ereignisse = await lauf(
+    klon,
+    tracker,
+    [
+      (auftrag) => {
+        commitet(auftrag)
+        return { erfolg: false }
+      },
+      ({ verzeichnis }) => {
+        commitDatei(verzeichnis, 'b.txt', 'b', 'Ticket 3 umsetzen')
+        return { erfolg: true }
+      },
+    ],
+    undefined,
+    1,
+  )
+
+  expect(tracker.ticket(3).offen).toBe(false)
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 3 umsetzen\ninit')
+  expect(ereignisse.filter((e) => e.art === 'ticket-gescheitert')).toMatchObject([
+    { ticket: 2, versuche: 1, pruefung: 'Run erfolgreich' },
+  ])
+})
+
+test('mehrere Commits seit dem Fixpunkt werden zu einem mit allen Messages', async () => {
+  const { remote, klon } = wegwerfRepo()
+
+  await lauf(klon, einTicket(), [
+    (auftrag) => {
+      commitet(auftrag)
+      commitDatei(auftrag.verzeichnis, 'b.txt', 'b', 'Review-Befunde beheben\n\nDetails')
+      return { erfolg: true }
+    },
+  ])
+
+  expect(git(remote, 'log', '--format=%B', 'spec/1')).toBe(
+    'Ticket 2 umsetzen\n\nReview-Befunde beheben\n\nDetails\n\ninit',
+  )
+  expect(git(remote, 'show', '--format=', '--name-only', 'spec/1')).toBe('a.txt\nb.txt')
+})
+
+test('die Check-Ausgabe für den nächsten Run ist von vorn auf 100 Zeilen gekürzt', async () => {
+  const { klon } = wegwerfRepo()
+  let rueckmeldung: string | undefined
+
+  await lauf(
+    klon,
+    einTicket(),
+    [
+      commitet,
+      (auftrag) => {
+        rueckmeldung = auftrag.rueckmeldung
+        return { erfolg: true }
+      },
+    ],
+    ['seq 1 150; exit 1'],
+    2,
+  )
+
+  expect(rueckmeldung).toContain('gekürzt')
+  expect(rueckmeldung).toContain('\n51\n')
+  expect(rueckmeldung).not.toContain('\n50\n')
+  expect(rueckmeldung?.endsWith('\n150')).toBe(true)
 })
