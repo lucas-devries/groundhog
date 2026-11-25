@@ -48,6 +48,10 @@ _Avoid_: Log, Transcript, Stream
 Die Grenze, die groundhog um einen Run und seine Checks legt und die bestimmt, was sie auf dem Rechner und im Netz erreichen. Die Engine liegt außerhalb.
 _Avoid_: Container, Abschottung, Isolation
 
+**Block**:
+Ein Aufruf des Agents in einem Run, der verweigert und nicht ausgeführt wurde.
+_Avoid_: Denial, Verweigerung, Ablehnung
+
 **Versuch**:
 Ein Durchgang aus einem Run und den anschließenden Checks an einem Ticket. Die Zahl der Versuche pro Ticket ist begrenzt.
 _Avoid_: Retry, Anlauf
