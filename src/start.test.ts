@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { git } from './git.ts'
-import { type MenueDialog, type Start, starte } from './start.ts'
+import { type MenueDialog, type Start, type StartOptionen, starte } from './start.ts'
 import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
 import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
 
@@ -85,7 +85,7 @@ const sperre = (klon: string) => join(klon, '.git', 'groundhog.lock')
 async function start(
   { klon, pfad }: { klon: string; pfad: string },
   antworten: (string | boolean | symbol)[],
-  optionen: { istTerminal?: boolean; sandboxFehlt?: () => string[] } = {},
+  optionen: Partial<StartOptionen> = {},
 ) {
   const { dialog, gezeigt } = fakeDialog(antworten)
   vi.stubEnv('PATH', pfad)
@@ -245,6 +245,76 @@ test('bei abgeschalteter Sandbox warnt das Menü, und der Lauf bekommt keine San
   })
   expect(sandboxFehlt).not.toHaveBeenCalled()
   expect(ergebnis).toMatchObject({ ok: true, sandbox: undefined })
+})
+
+const UPDATE_FRAGE = {
+  art: 'confirm',
+  message: 'groundhog v0.2.0 ist erschienen. Jetzt aktualisieren?',
+  initialValue: false,
+  active: 'Ja',
+  inactive: 'Nein',
+}
+
+test('gibt es eine neuere Version, fragt das Menü zuerst nach dem Update; Nein startet den Lauf', async () => {
+  const { klon, pfad } = bereit()
+  const installiere = vi.fn()
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [false, 'main', 'pr'], {
+    update: { neuereVersion: () => 'v0.2.0', installiere },
+  })
+
+  expect(gezeigt[0]).toEqual(UPDATE_FRAGE)
+  expect(gezeigt[1]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
+  expect(installiere).not.toHaveBeenCalled()
+  expect(ergebnis).toMatchObject({ ok: true, auswahl: { zielBranch: 'main', abschluss: 'pr' } })
+})
+
+test('Ja zum Update installiert den Tag, beendet den Start und bittet um einen neuen Start', async () => {
+  const { klon, pfad } = bereit()
+  const installiere = vi.fn()
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true], {
+    update: { neuereVersion: () => 'v0.2.0', installiere },
+  })
+
+  expect(gezeigt).toEqual([UPDATE_FRAGE])
+  expect(installiere).toHaveBeenCalledWith('v0.2.0')
+  expect(ergebnis).toEqual({
+    ok: false,
+    exitCode: 0,
+    meldung: 'groundhog v0.2.0 ist installiert. Starte neu: groundhog 25',
+  })
+  expect(existsSync(sperre(klon))).toBe(false)
+})
+
+test('scheitert das Update, bricht der Start mit der Meldung ab', async () => {
+  const { klon, pfad } = bereit()
+
+  const { ergebnis } = await start({ klon, pfad }, [true], {
+    update: {
+      neuereVersion: () => 'v0.2.0',
+      installiere: () => {
+        throw new Error('Das Update auf v0.2.0 ist gescheitert.')
+      },
+    },
+  })
+
+  expect(ergebnis).toEqual({
+    ok: false,
+    exitCode: 1,
+    meldung: 'Das Update auf v0.2.0 ist gescheitert.',
+  })
+  expect(existsSync(sperre(klon))).toBe(false)
+})
+
+test('ohne neuere Version fragt das Menü nicht nach dem Update', async () => {
+  const { klon, pfad } = bereit()
+
+  const { gezeigt } = await start({ klon, pfad }, ['main', 'pr'], {
+    update: { neuereVersion: () => undefined, installiere: vi.fn() },
+  })
+
+  expect(gezeigt[0]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
 })
 
 const ohneSubIssues: GhAntwort = {

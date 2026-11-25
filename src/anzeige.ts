@@ -135,7 +135,7 @@ const ABSCHLUSS: Record<Auswahl['abschluss'], string> = {
 }
 
 /** HH:MM in lokaler Zeit; liegt `ms` an einem anderen Tag als `jetzt`, mit Datum davor. */
-function uhrzeit(ms: number, jetzt: number): string {
+export function uhrzeit(ms: number, jetzt: number): string {
   const d = new Date(ms)
   const zeit = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
   if (d.toDateString() === new Date(jetzt).toDateString()) return zeit
@@ -145,7 +145,7 @@ function uhrzeit(ms: number, jetzt: number): string {
 type Stil = ReturnType<typeof stil>
 const hell = createEmphasize(common)
 
-function stil(farbe: boolean) {
+export function stil(farbe: boolean) {
   const ansi = (code: number) => (t: string) => (farbe ? `\x1b[${code}m${t}\x1b[0m` : t)
   return {
     fett: ansi(1),
