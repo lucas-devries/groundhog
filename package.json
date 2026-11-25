@@ -23,6 +23,7 @@
     "vitest": "^5.1.2"
   },
   "dependencies": {
-    "@clack/prompts": "^1.9.0"
+    "@clack/prompts": "^1.9.0",
+    "emphasize": "^7.0.0"
   }
 }
