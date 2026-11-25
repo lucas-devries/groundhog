@@ -106,7 +106,7 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
                 ? `${wahl}: ${a.url}`
                 : a.art === 'nichts'
                   ? `${wahl}: ${integration} bleibt stehen`
-                  : `${wahl} entfällt, weil ${a.grund} sind. Nächster Lauf: groundhog ${spec}`
+                  : `${wahl} entfällt, weil ${a.grund === 'abgebrochen' ? 'der Lauf abgebrochen wurde' : `${a.grund} sind`}. Nächster Lauf: groundhog ${spec}`
         const tickets =
           uebernommen === 0
             ? 'keine Tickets übernommen'
