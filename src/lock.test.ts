@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { nimmSperre } from './sperre.ts'
-import { wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { nimmSperre } from './lock.ts'
+import { wegwerfRepo } from './testing/throwaway-repo.ts'
 
 const datei = (klon: string) => join(klon, '.git', 'groundhog.lock')
 

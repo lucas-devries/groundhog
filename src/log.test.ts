@@ -2,12 +2,12 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { type AgentSkript, fakeAgent } from './agent.ts'
+import { steuerbareUhr } from './clock.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
-import { oeffneProtokoll } from './protokoll.ts'
+import { oeffneProtokoll } from './log.ts'
 import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 const START = new Date(2026, 10, 25, 3, 4, 5).getTime()
 

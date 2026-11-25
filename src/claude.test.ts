@@ -46,7 +46,7 @@ function auftrag(teil: Partial<RunAuftrag> = {}): RunAuftrag & { zeilen: string[
 }
 
 test('ein Run ruft implement mit der Ticket-URL auf, mit stream-json, Permission-Modus und AFK-Hinweis, stdin auf /dev/null', async () => {
-  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }])
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-session-green.jsonl' }])
   const a = auftrag()
 
   await agent.run(a)
@@ -72,7 +72,7 @@ test('der Run bekommt das gh-Token der Engine und keinen Retry-Watchdog und kein
   vi.stubEnv('CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS', '60000')
   vi.stubEnv('ANTHROPIC_LOG', 'debug')
   vi.stubEnv('GH_TOKEN', 'gho_fremd')
-  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }])
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-session-green.jsonl' }])
 
   await agent.run(auftrag())
 
@@ -81,7 +81,7 @@ test('der Run bekommt das gh-Token der Engine und keinen Retry-Watchdog und kein
 
 // Aufnahme: der erste Run aus prototype/cli-oberflaeche/run.jsonl (echter Run, CLI 2.1.331).
 test('ein erfolgreicher Run meldet jede Zeile des Stroms, die Session, die Skills, Tokens und Kosten', async () => {
-  const { agent } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }])
+  const { agent } = mitFake([{ aufnahme: 'claude-session-green.jsonl' }])
   const a = auftrag()
 
   const ergebnis = await agent.run(a)
@@ -105,7 +105,7 @@ test('ein erfolgreicher Run meldet jede Zeile des Stroms, die Session, die Skill
 })
 
 test('in der Sandbox läuft der ganze claude-Prozess darin, mit Bypass', async () => {
-  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }])
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-session-green.jsonl' }])
   const a = auftrag()
 
   await agent.run(a)
@@ -117,7 +117,7 @@ test('in der Sandbox läuft der ganze claude-Prozess darin, mit Bypass', async (
 })
 
 test('ohne Sandbox läuft der Run im Auto-Mode; ab Versuch 2 hängt die Rückmeldung am Prompt', async () => {
-  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }], false)
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-session-green.jsonl' }], false)
 
   await agent.run(auftrag({ rueckmeldung: 'Check `npm test` endete mit Exit 1.' }))
 
@@ -131,7 +131,7 @@ test('ohne Sandbox läuft der Run im Auto-Mode; ab Versuch 2 hängt die Rückmel
 
 test('ein Run ist nur bei Exit 0, is_error false und subtype success erfolgreich', async () => {
   const { agent } = mitFake([
-    { aufnahme: 'claude-run-gruen.jsonl', exitCode: 1 },
+    { aufnahme: 'claude-session-green.jsonl', exitCode: 1 },
     { aufnahme: 'claude-server-throttle.jsonl', exitCode: 0 },
     { exitCode: 0 },
   ])
@@ -177,7 +177,7 @@ test('ein Abbruch am Usage-Limit wird erkannt und mit der Reset-Zeit in ms gemel
 test('api_error usage_limit_reached allein ist ein Limit, nur mit Exit ungleich 0', async () => {
   const { agent } = mitFake([
     { aufnahme: 'claude-usage-limit.jsonl', exitCode: 0 },
-    { aufnahme: 'claude-usage-limit-ohne-event.jsonl', exitCode: 1 },
+    { aufnahme: 'claude-usage-limit-without-event.jsonl', exitCode: 1 },
   ])
 
   expect((await agent.run(auftrag())).usageLimit).toBeUndefined()
@@ -199,7 +199,7 @@ test('ein Server-Throttle (rejected ohne resetsAt) ist kein Usage-Limit', async 
 })
 
 test('credits_required ohne resetsAt meldet, dass es nur mit Guthaben weitergeht', async () => {
-  const { agent } = mitFake([{ aufnahme: 'claude-guthaben.jsonl', exitCode: 1 }])
+  const { agent } = mitFake([{ aufnahme: 'claude-credit.jsonl', exitCode: 1 }])
 
   expect((await agent.run(auftrag())).usageLimit).toBe('guthaben')
 })
@@ -220,8 +220,8 @@ test('bricht die Engine ab, beendet der Adapter den Run samt Kindprozessen', asy
 
 test('/usage meldet das späteste Reset der erschöpften Fenster, sonst nichts', async () => {
   const { agent, aufrufe } = mitFake([
-    { aufnahme: 'claude-usage-erschoepft.jsonl' },
-    { aufnahme: 'claude-usage-frei.jsonl' },
+    { aufnahme: 'claude-usage-exhausted.jsonl' },
+    { aufnahme: 'claude-usage-free.jsonl' },
   ])
 
   expect(await agent.erschoepftBis()).toBe(Date.parse('2026-11-27T01:00:00Z'))

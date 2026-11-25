@@ -5,7 +5,7 @@ import { expect, test } from 'vitest'
 import { git } from './git.ts'
 import { type Dialog, init } from './init.ts'
 import { FESTE_HOSTS } from './sandbox.ts'
-import { wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { wegwerfRepo } from './testing/throwaway-repo.ts'
 
 const ABBRUCH = Symbol('Strg+C')
 type Antwort = string | string[] | boolean | typeof ABBRUCH

@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from 'node:util'
-import { anzeige, stil, uhrzeit } from './anzeige.ts'
+import { anzeige, stil, uhrzeit } from './display.ts'
 import type { Ereignis, GraphTicket } from './engine.ts'
 
 export interface TafelOptionen {

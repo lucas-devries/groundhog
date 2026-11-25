@@ -1,4 +1,4 @@
-import type { Uhr } from './uhr.ts'
+import type { Uhr } from './clock.ts'
 
 /** Frist für das zweite Strg+C. */
 const FRIST = 5_000

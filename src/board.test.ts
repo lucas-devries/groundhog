@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { expect, test } from 'vitest'
+import { tafel, zeigeTafel } from './board.ts'
 import type { Ereignis } from './engine.ts'
-import { tafel, zeigeTafel } from './tafel.ts'
 import { frontierZustand, type Ticket } from './tracker.ts'
 
 /** Der Bildschirm der Tafel nach einer Folge von Ereignissen, ohne Farben. */

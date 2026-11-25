@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { leseKonfiguration } from './konfiguration.ts'
+import { leseKonfiguration } from './config.ts'
 
 function mitDatei(inhalt: string): string {
   const verzeichnis = mkdtempSync(join(tmpdir(), 'groundhog-'))

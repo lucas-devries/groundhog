@@ -15,7 +15,7 @@ import { git } from './git.ts'
 import { type MenueDialog, type Start, type StartOptionen, starte } from './start.ts'
 import { type ClaudeAntwort, fakeClaude } from './testing/fake-claude.ts'
 import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 
 const ABBRUCH = Symbol('Strg+C')
 
@@ -44,8 +44,8 @@ const NUTZER = { ausgabe: 'lucas\n' }
 const CLAUDE_VERSION: ClaudeAntwort = { aufnahme: 'claude-version.txt' }
 /** `claude auth status` eines angemeldeten `claude`. */
 const ANGEMELDET: ClaudeAntwort = {}
-const MIT_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-mit-skills.jsonl' }
-const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-ohne-skills.jsonl' }
+const MIT_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-with-skills.jsonl' }
+const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-without-skills.jsonl' }
 
 const KONFIGURATION = {
   checks: ['npm ci', 'npm test'],
@@ -59,7 +59,7 @@ const KONFIGURATION = {
  * `claude` als Fakes allein im `PATH` (neben `git` und `node`).
  */
 function bereit({
-  gh = [GH_VERSION, TOKEN, NUTZER, aufnahme('startpruefung-spec-25.json')],
+  gh = [GH_VERSION, TOKEN, NUTZER, aufnahme('start-check-spec-25.json')],
   konfiguration = KONFIGURATION as object | null,
   claude = [CLAUDE_VERSION, ANGEMELDET, MIT_SKILLS] as ClaudeAntwort[] | null,
   ohne = [] as string[],
@@ -496,7 +496,7 @@ const FAELLE: Fall[] = [
         GH_VERSION,
         TOKEN,
         NUTZER,
-        aufnahme('startpruefung-ohne-sub-issues-und-human-label.json'),
+        aufnahme('start-check-without-sub-issues-and-human-label.json'),
       ],
     },
     meldung: ['fehlt das Label ready-for-human'],

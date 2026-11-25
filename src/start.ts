@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import { leseStromZeile, type StromZeile } from './claude.ts'
+import { type Konfiguration, leseKonfiguration } from './config.ts'
 import { ABSCHLUSS, type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 import { git } from './git.ts'
 import { GitHubTracker } from './github.ts'
-import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
-import { oeffneProtokoll, type Protokoll } from './protokoll.ts'
+import { nimmSperre } from './lock.ts'
+import { oeffneProtokoll, type Protokoll } from './log.ts'
 import { type SrtSandbox, sandboxFehlt, srtSandbox } from './sandbox.ts'
-import { nimmSperre } from './sperre.ts'
 import { frontierZustand, type Ticket } from './tracker.ts'
 
 /** Die Antwort von `@clack/prompts` auf Strg+C. */

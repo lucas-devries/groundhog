@@ -1,7 +1,7 @@
 import { delimiter } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { git } from './git.ts'
-import { eigeneProzessgruppe, meldetProzessgruppe } from './testing/prozessgruppe.ts'
+import { eigeneProzessgruppe, meldetProzessgruppe } from './testing/process-group.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()

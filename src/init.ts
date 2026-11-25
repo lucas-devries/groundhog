@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DATEI, type Konfiguration, leseKonfiguration, VERSUCHE_STANDARD } from './config.ts'
 import { git } from './git.ts'
-import { DATEI, type Konfiguration, leseKonfiguration, VERSUCHE_STANDARD } from './konfiguration.ts'
 import { FESTE_HOSTS } from './sandbox.ts'
 import type { StrgC } from './start.ts'
 

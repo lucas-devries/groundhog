@@ -2,7 +2,7 @@ import { delimiter } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { GitHubTracker } from './github.ts'
 import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
-import { eigeneProzessgruppe, meldetProzessgruppe } from './testing/prozessgruppe.ts'
+import { eigeneProzessgruppe, meldetProzessgruppe } from './testing/process-group.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -126,8 +126,8 @@ test('kommentieren und einen PR anlegen geben den Text über stdin an gh', async
 
 test('die Start-Prüfung meldet fehlende Labels, die Zahl der Sub-Issues und die Repo-URL', async () => {
   const { tracker } = await verbunden([
-    aufnahme('startpruefung-spec-25.json'),
-    aufnahme('startpruefung-ohne-sub-issues-und-human-label.json'),
+    aufnahme('start-check-spec-25.json'),
+    aufnahme('start-check-without-sub-issues-and-human-label.json'),
   ])
 
   expect(await tracker.startPruefung(25)).toEqual({

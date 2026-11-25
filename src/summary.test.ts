@@ -1,12 +1,12 @@
 import { hostname } from 'node:os'
 import { expect, test } from 'vitest'
 import { type AgentSkript, fakeAgent } from './agent.ts'
+import { steuerbareUhr } from './clock.ts'
 import { type Ereignis, fahreLauf, type LaufEingabe } from './engine.ts'
 import { git } from './git.ts'
 import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 const START = new Date(2026, 10, 25, 22, 0, 0).getTime()
 const MINUTE = 60_000

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import * as p from '@clack/prompts'
-import { abbruchWaechter } from './abbruch.ts'
-import { anzeige } from './anzeige.ts'
+import { abbruchWaechter } from './abort.ts'
+import { zeigeTafel } from './board.ts'
 import { claudeAgent } from './claude.ts'
+import { systemUhr } from './clock.ts'
+import { anzeige } from './display.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
 import { herdr } from './herdr.ts'
 import { init } from './init.ts'
 import { durchreiche } from './sandbox.ts'
 import { starte } from './start.ts'
-import { zeigeTafel } from './tafel.ts'
-import { systemUhr } from './uhr.ts'
 import { aktualisiere, installiere, neuereVersion, VERSION } from './update.ts'
 
 const HILFE = `groundhog ${VERSION}: arbeitet die Tickets einer Spec ab, ohne Menschen.

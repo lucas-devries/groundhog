@@ -56,5 +56,5 @@ export function fakeGh(antworten: GhAntwort[]) {
 
 /** Eine aufgezeichnete Antwort von GitHub aus `aufnahmen/`. */
 export function aufnahme(name: string): GhAntwort {
-  return { ausgabe: readFileSync(join(import.meta.dirname, 'aufnahmen', name), 'utf8') }
+  return { ausgabe: readFileSync(join(import.meta.dirname, 'recordings', name), 'utf8') }
 }

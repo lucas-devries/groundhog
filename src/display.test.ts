@@ -2,12 +2,12 @@ import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { expect, test } from 'vitest'
 import { fakeAgent } from './agent.ts'
-import { anzeige } from './anzeige.ts'
+import { steuerbareUhr } from './clock.ts'
+import { anzeige } from './display.ts'
 import { type AbschlussErgebnis, type Ereignis, fahreLauf } from './engine.ts'
 import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 /** Was die Anzeige ohne Terminal aus einer Folge von Ereignissen schreibt. */
 function text(ereignisse: Ereignis[], optionen: Parameters<typeof anzeige>[0] = {}): string {
@@ -262,7 +262,7 @@ test.each([
 test('ein echter Run, durch die Engine gemeldet, erscheint fortlaufend ohne Farbe und ohne überlange Zeilen', async () => {
   const { klon } = wegwerfRepo()
   const aufnahme = readFileSync(
-    new URL('./testing/aufnahmen/claude-run-edit.jsonl', import.meta.url),
+    new URL('./testing/recordings/claude-session-edit.jsonl', import.meta.url),
     'utf8',
   )
   const ereignisse: Ereignis[] = []

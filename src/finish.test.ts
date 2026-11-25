@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest'
 import { type AgentSkript, fakeAgent } from './agent.ts'
+import { steuerbareUhr } from './clock.ts'
 import { type Auswahl, type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
 import { git } from './git.ts'
 import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 const ticket = (nummer: number, teil: Partial<Ticket> = {}): Ticket => ({
   nummer,

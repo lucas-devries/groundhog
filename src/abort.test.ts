@@ -1,14 +1,14 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { abbruchWaechter } from './abbruch.ts'
+import { abbruchWaechter } from './abort.ts'
 import { type AgentSkript, fakeAgent, type RunAuftrag } from './agent.ts'
+import { steuerbareUhr } from './clock.ts'
 import { type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
 import { git } from './git.ts'
 import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 const zweiTickets = () =>
   new InMemoryTracker('ich', [

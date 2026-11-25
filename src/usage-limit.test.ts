@@ -2,11 +2,11 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { type AgentSkript, fakeAgent } from './agent.ts'
+import { steuerbareUhr } from './clock.ts'
 import { type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
 import { durchreiche, type Sandbox } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
+import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
-import { steuerbareUhr } from './uhr.ts'
 
 const MINUTE = 60_000
 const PUFFER = MINUTE

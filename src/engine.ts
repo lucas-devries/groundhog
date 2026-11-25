@@ -1,10 +1,10 @@
 import type { Agent, Block, RunErgebnis } from './agent.ts'
+import type { Uhr } from './clock.ts'
+import { VERSUCHE_STANDARD } from './config.ts'
 import { git } from './git.ts'
-import { VERSUCHE_STANDARD } from './konfiguration.ts'
 import type { Sandbox } from './sandbox.ts'
+import { fundort, kommentarGescheitert, uebersicht } from './summary.ts'
 import { type FrontierZustand, frontierZustand, type Ticket, type Tracker } from './tracker.ts'
-import { fundort, kommentarGescheitert, uebersicht } from './uebersicht.ts'
-import type { Uhr } from './uhr.ts'
 
 export interface Auswahl {
   zielBranch: string

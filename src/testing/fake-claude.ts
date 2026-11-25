@@ -57,7 +57,7 @@ export function fakeClaude(antworten: ClaudeAntwort[]) {
   const verzeichnis = mkdtempSync(join(tmpdir(), 'fake-claude-'))
   const mitPfad = antworten.map((a) => ({
     ...a,
-    aufnahme: a.aufnahme && join(import.meta.dirname, 'aufnahmen', a.aufnahme),
+    aufnahme: a.aufnahme && join(import.meta.dirname, 'recordings', a.aufnahme),
   }))
   writeFileSync(join(verzeichnis, 'antworten.json'), JSON.stringify(mitPfad))
   writeFileSync(join(verzeichnis, 'aufrufe.jsonl'), '')
