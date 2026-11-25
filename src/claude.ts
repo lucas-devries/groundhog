@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { Agent, Block, RunErgebnis } from './agent.ts'
+import type { SrtSandbox } from './sandbox.ts'
 
 export interface ClaudeOptionen {
   /** `https://github.com/<owner>/<repo>`; die Ticket-URL ist `<repoUrl>/issues/<n>`. */
@@ -8,10 +9,11 @@ export interface ClaudeOptionen {
   /** Das `gh`-Token der Engine; der Run bekommt es als `GH_TOKEN`. */
   token: string
   /**
-   * Läuft der Run in der Sandbox? Davon hängt der Permission-Modus ab: Bypass nur in der Sandbox,
-   * sonst Auto-Mode. Bypass ohne Sandbox gibt es nicht.
+   * Die Sandbox um den ganzen `claude`-Prozess jedes Runs; `undefined` nur bei `sandbox.aus`. Davon
+   * hängt der Permission-Modus ab: Bypass nur in der Sandbox, sonst Auto-Mode. Bypass ohne Sandbox
+   * gibt es nicht.
    */
-  sandbox: boolean
+  sandbox: Pick<SrtSandbox, 'umhuelle'> | undefined
 }
 
 /** Der AFK-Hinweis, den jeder Run per `--append-system-prompt` bekommt. */
@@ -34,18 +36,20 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
       let prompt = `/mattpocock-skills:implement ${optionen.repoUrl}/issues/${auftrag.ticket.nummer}`
       if (auftrag.rueckmeldung) prompt += `\n\n${auftrag.rueckmeldung}`
       const strom = auswertung()
+      const aufruf = [
+        'claude',
+        '-p',
+        prompt,
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--permission-mode',
+        optionen.sandbox ? 'bypassPermissions' : 'auto',
+        '--append-system-prompt',
+        afkHinweis(auftrag.fixpunkt),
+      ]
       const exitCode = await starte(
-        [
-          '-p',
-          prompt,
-          '--output-format',
-          'stream-json',
-          '--verbose',
-          '--permission-mode',
-          optionen.sandbox ? 'bypassPermissions' : 'auto',
-          '--append-system-prompt',
-          afkHinweis(auftrag.fixpunkt),
-        ],
+        optionen.sandbox?.umhuelle(aufruf, auftrag.verzeichnis) ?? aufruf,
         { verzeichnis: auftrag.verzeichnis, env, signal: auftrag.signal },
         (zeile) => {
           auftrag.ausgabe(zeile)
@@ -55,11 +59,11 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
       return strom.ergebnis(exitCode)
     },
 
-    // `/usage` ruft kein Modell auf und kostet nichts.
+    // `/usage` ruft kein Modell und kein Tool auf und kostet nichts; es läuft ohne Sandbox.
     async erschoepftBis() {
       let bis: number | undefined
       await starte(
-        ['-p', '/usage', '--output-format', 'stream-json', '--verbose'],
+        ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose'],
         { verzeichnis: process.cwd(), env },
         (zeile) => {
           for (const fenster of parse(zeile)?.usage_report?.rate_limits?.limits ?? []) {
@@ -87,11 +91,12 @@ function umgebung(token: string): NodeJS.ProcessEnv {
 }
 
 /**
- * Startet `claude` mit stdin auf `/dev/null` und reicht jede Zeile von stdout und stderr weiter.
- * Bricht `signal` ab, stirbt die ganze Prozessgruppe. Liefert den Exit-Code (`null` nach Signal).
+ * Startet `argv` (`claude`, ggf. in der Sandbox) mit stdin auf `/dev/null` und reicht jede Zeile
+ * von stdout und stderr weiter. Bricht `signal` ab, stirbt die ganze Prozessgruppe. Liefert den
+ * Exit-Code (`null` nach Signal).
  */
 function starte(
-  args: string[],
+  [datei = '', ...args]: string[],
   {
     verzeichnis,
     env,
@@ -100,7 +105,7 @@ function starte(
   aufZeile: (zeile: string) => void,
 ): Promise<number | null> {
   return new Promise((resolve, reject) => {
-    const kind = spawn('claude', args, {
+    const kind = spawn(datei, args, {
       cwd: verzeichnis,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],

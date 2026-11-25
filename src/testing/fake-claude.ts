@@ -31,7 +31,7 @@ const antwort = JSON.parse(fs.readFileSync(path.join(__dirname, 'antworten.json'
 let stdin = '?'
 try { stdin = fs.readlinkSync('/proc/self/fd/0') } catch {}
 const env = {}
-for (const k of ['GH_TOKEN', 'ANTHROPIC_LOG', 'CLAUDE_CODE_RETRY_WATCHDOG', 'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS']) env[k] = process.env[k]
+for (const k of ['GH_TOKEN', 'IN_FAKE_SRT', 'ANTHROPIC_LOG', 'CLAUDE_CODE_RETRY_WATCHDOG', 'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS']) env[k] = process.env[k]
 const aufruf = { args: process.argv.slice(2), cwd: process.cwd(), stdin, env }
 if (!antwort) {
   fs.appendFileSync(log, JSON.stringify(aufruf) + '\\n')
