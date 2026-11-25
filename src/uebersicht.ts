@@ -16,7 +16,15 @@ export function uebersicht(ereignisse: Ereignis[]): string {
   let begonnen: Extract<Ereignis, { art: 'lauf-begonnen' }> | undefined
   let beendet: Extract<Ereignis, { art: 'lauf-beendet' }> | undefined
   const verlauf = (nr: number) => {
-    const t = tickets.get(nr) ?? { beginn: 0, von: 0, blocks: [] }
+    const t = tickets.get(nr) ?? {
+      ergebnis: 'unterbrochen',
+      beginn: 0,
+      versuch: 0,
+      von: 0,
+      pausen: 0,
+      pausiert: false,
+      blocks: [],
+    }
     tickets.set(nr, t)
     return t
   }
@@ -36,19 +44,37 @@ export function uebersicht(ereignisse: Ereignis[]): string {
         verlauf(e.ticket).beginn = e.zeit
         break
       case 'versuch-begonnen':
-        verlauf(e.ticket).von = e.von
+        Object.assign(verlauf(e.ticket), { versuch: e.versuch, von: e.von })
         break
-      case 'run-beendet':
-        verlauf(e.ticket).blocks.push(...(e.blocks ?? []))
-        verlauf(e.ticket).sessionId = e.sessionId
+      case 'run-beendet': {
+        const t = verlauf(e.ticket)
+        t.blocks.push(...(e.blocks ?? []))
+        t.sessionId = e.sessionId
+        t.pausiert = false
         break
+      }
+      case 'pause': {
+        // Nach dem Reset wartet die Engine womöglich weiter; das bleibt dieselbe Pause.
+        const t = verlauf(e.ticket)
+        if (!t.pausiert) t.pausen++
+        t.pausiert = true
+        break
+      }
       case 'ticket-erledigt':
-        verlauf(e.ticket).ende = { ...e, ergebnis: `Commit ${e.commit}` }
+        Object.assign(verlauf(e.ticket), {
+          ergebnis: 'erledigt',
+          ende: e.zeit,
+          zusatz: `Commit ${e.commit}`,
+        })
         break
       case 'ticket-gescheitert': {
         const t = verlauf(e.ticket)
         const resume = t.sessionId ? ` · \`claude --resume ${t.sessionId}\`` : ''
-        t.ende = { ...e, ergebnis: `rot: ${e.pruefung}${resume}` }
+        Object.assign(t, {
+          ergebnis: 'gescheitert',
+          ende: e.zeit,
+          zusatz: `rot: ${e.pruefung}${resume}`,
+        })
         break
       }
     }
@@ -88,15 +114,17 @@ export function uebersicht(ereignisse: Ereignis[]): string {
   )
   const zeilen = nummern.map((nr) => {
     const t = tickets.get(nr)
-    if (t?.ende) {
-      const { ende, blocks } = t
-      const zeile =
-        `- #${nr} ${ende.art === 'ticket-erledigt' ? 'erledigt' : 'gescheitert'}` +
-        ` · Versuche ${ende.versuche} von ${t.von}` +
-        // #29: Pausen am Usage-Limit zählen, sobald es das Ereignis gibt.
-        ' · Pausen 0' +
-        ` · Dauer ${dauer(ende.zeit - t.beginn)} · Blocks ${blocks.length} · ${ende.ergebnis}`
-      return [zeile, ...blocks.map((b) => `  - ${b.tool}: \`${b.befehl}\``)].join('\n')
+    if (t) {
+      const ende = t.ende ?? beendet?.zeit ?? t.beginn
+      const zeile = [
+        `- #${nr} ${t.ergebnis}`,
+        `Versuche ${t.versuch} von ${t.von}`,
+        `Pausen ${t.pausen}`,
+        `Dauer ${dauer(ende - t.beginn)}`,
+        `Blocks ${t.blocks.length}`,
+        ...(t.zusatz ? [t.zusatz] : []),
+      ].join(' · ')
+      return [zeile, ...t.blocks.map((b) => `  - ${b.tool}: \`${b.befehl}\``)].join('\n')
     }
     const g = graph.find((g) => g.nummer === nr)
     const offeneBlocker = g?.blocker.filter((b) => b.offen) ?? []
@@ -111,12 +139,19 @@ export function uebersicht(ereignisse: Ereignis[]): string {
 }
 
 interface TicketVerlauf {
+  /** Ohne Ende-Ereignis des Tickets ist der Lauf mittendrin zu Ende gegangen. */
+  ergebnis: 'erledigt' | 'gescheitert' | 'unterbrochen'
   beginn: number
+  ende?: number
+  versuch: number
   /** Höchstzahl der Versuche. */
   von: number
+  pausen: number
+  pausiert: boolean
   blocks: Block[]
   sessionId?: string
-  ende?: { art: string; zeit: number; versuche: number; ergebnis: string }
+  /** Commit oder rote Prüfung. */
+  zusatz?: string
 }
 
 /** JJJJ-MM-TT HH:MM:SS in lokaler Zeit. */

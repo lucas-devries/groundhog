@@ -192,3 +192,20 @@ test('die Übersicht nennt den Lauf und je Ticket eine Zeile; die Spec bekommt s
 - Protokoll: \`/tmp/laeufe/20261125-220000-spec-1\``,
   ])
 })
+
+test('die Übersicht zählt Pausen am Usage-Limit und zeigt ein angehaltenes Ticket als unterbrochen', async () => {
+  const { remote, klon } = wegwerfRepo()
+  const tracker = new InMemoryTracker('ich', [ticket(2), ticket(3)])
+
+  const { ereignisse } = await lauf(klon, tracker, [
+    () => ({ erfolg: false, usageLimit: START + 30 * MINUTE }),
+    gruen,
+    () => ({ erfolg: false, usageLimit: 'guthaben' }),
+  ])
+
+  const ende = ereignisse.at(-1)
+  expect(ende?.art === 'lauf-beendet' && ende.uebersicht.split('\n## Tickets\n\n')[1]).toBe(
+    `- #2 erledigt · Versuche 1 von 3 · Pausen 1 · Dauer 41 min · Blocks 0 · Commit ${git(remote, 'rev-parse', 'spec/1')}
+- #3 unterbrochen · Versuche 1 von 3 · Pausen 0 · Dauer 10 min · Blocks 0`,
+  )
+})

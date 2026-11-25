@@ -50,6 +50,10 @@ type LaufEreignis =
 type TicketEreignis = { ticket: number } & (
   | { art: 'ticket-genommen' }
   | { art: 'versuch-begonnen'; versuch: number; von: number }
+  /** Pause am Usage-Limit; `reset` ist die Reset-Zeit in ms, ohne Puffer. */
+  | { art: 'pause'; reset: number }
+  /** Am Usage-Limit ohne Reset-Zeit: Es geht erst mit Guthaben weiter. */
+  | { art: 'lauf-angehalten'; grund: 'guthaben' }
   /** Eine Zeile der rohen Ausgabe des Runs, gefiltert. */
   | { art: 'run-ausgabe'; run: number; zeile: string }
   /** `run` zählt Runs pro Ticket im Lauf, nicht Versuche. */
@@ -81,7 +85,16 @@ export type AbschlussErgebnis =
 export interface LaufErgebnis {
   tickets: TicketErgebnis[]
   abschluss: AbschlussErgebnis
+  /** Gesetzt, wenn der Lauf vorzeitig angehalten hat: Am Usage-Limit fehlt Guthaben. */
+  angehalten?: 'guthaben'
 }
+
+const MINUTE = 60_000
+const RUN_ZEITLIMIT = 60 * MINUTE
+/** Für einen Durchgang aller Checks zusammen. */
+const CHECKS_ZEITLIMIT = 15 * MINUTE
+/** Nach dem Reset des Usage-Limits: `resetsAt` ist auf Sekunden gerundet, die Server-Uhr kann abweichen. */
+const RESET_PUFFER = MINUTE
 
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
@@ -108,6 +121,13 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       })
     }
   }
+  /** Reguläres Ende: Übersicht an die Spec und ins Ende-Ereignis. */
+  const beende = async (abschluss: AbschlussErgebnis) => {
+    const ende = { art: 'lauf-beendet', abschluss, zeit: uhr.jetzt() } as const
+    const text = uebersicht([...verlauf, { ...ende, uebersicht: '' }])
+    await kommentiere(spec, `${text}\n\n${fundort(eingabe.protokoll)}`)
+    eingabe.melde?.({ ...ende, uebersicht: text })
+  }
   melde({ art: 'lauf-begonnen', spec, auswahl, versionen: eingabe.versionen ?? {} })
 
   git(verzeichnis, 'fetch', '-q', 'origin')
@@ -127,10 +147,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
         graph.every((t) => !t.offen),
         kommentiere,
       )
-      const ende = { art: 'lauf-beendet', abschluss, uebersicht: '', zeit: uhr.jetzt() } as const
-      const text = uebersicht([...verlauf, ende])
-      await kommentiere(spec, `${text}\n\n${fundort(eingabe.protokoll)}`)
-      eingabe.melde?.({ ...ende, uebersicht: text })
+      await beende(abschluss)
       return { ...ergebnis, abschluss }
     }
     const nr = ticket.nummer
@@ -148,9 +165,9 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     }
 
     /** Prüft einen Versuch; liefert bei Rot die rote Prüfung und die Rückmeldung für den nächsten Run. */
-    const pruefe = async (runErfolg: boolean): Promise<Rot | undefined> => {
+    const pruefe = async (runErfolg: boolean, runAbgelaufen: boolean): Promise<Rot | undefined> => {
       const pruefungen: [string, boolean][] = [
-        ['Run erfolgreich', runErfolg],
+        ['Run erfolgreich', runErfolg && !runAbgelaufen],
         [`HEAD auf ${ticketBranch}`, aktuellerBranch(verzeichnis) === ticketBranch],
         [
           'neuer Commit seit Fixpunkt',
@@ -163,19 +180,26 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       if (rot) {
         return {
           pruefung: rot[0],
-          rueckmeldung: `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
+          rueckmeldung: runAbgelaufen
+            ? `Der letzte Versuch war rot: Der Run wurde nach ${RUN_ZEITLIMIT / MINUTE} Minuten beendet.`
+            : `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
         }
       }
+      const signal = uhr.zeitlimit(CHECKS_ZEITLIMIT)
       for (const check of eingabe.checks) {
-        const ausfuehrung = await eingabe.sandbox.fuehreAus(check, { verzeichnis })
+        const ausfuehrung = await eingabe.sandbox.fuehreAus(check, { verzeichnis, signal })
         const { exitCode } = ausfuehrung
         const ausgabe = filtere(ausfuehrung.ausgabe)
         const pruefung = `Check: ${check}`
-        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok: exitCode === 0, ausgabe })
-        if (exitCode !== 0) {
+        const ok = exitCode === 0 && !signal.aborted
+        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok, ausgabe })
+        if (!ok) {
+          const grund = signal.aborted
+            ? `wurde nach ${CHECKS_ZEITLIMIT / MINUTE} Minuten beendet (Zeitlimit für alle Checks)`
+            : `endete mit Exit ${exitCode}`
           return {
             pruefung,
-            rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` endete mit Exit ${exitCode}.\n\n${kuerzeVonVorn(ausgabe)}`,
+            rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` ${grund}.\n\n${kuerzeVonVorn(ausgabe)}`,
             ausgabe,
           }
         }
@@ -193,19 +217,41 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     while (versuch < versuche) {
       versuch++
       melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
-      const r = ++runs
-      const run = await eingabe.agent.run({
-        ticket,
-        verzeichnis,
-        fixpunkt,
-        rueckmeldung: rot?.rueckmeldung,
-        ausgabe: (zeile) =>
-          melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
-      })
-      melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
-      blocks.push(...(run.blocks ?? []))
-      sessionId = run.sessionId
-      rot = await pruefe(run.erfolg)
+      let run: RunErgebnis
+      let signal: AbortSignal
+      while (true) {
+        // Jeder Neustart nach dem Usage-Limit ist ein eigener Run mit eigener Nummer.
+        const r = ++runs
+        signal = uhr.zeitlimit(RUN_ZEITLIMIT)
+        run = await eingabe.agent.run({
+          ticket,
+          verzeichnis,
+          fixpunkt,
+          rueckmeldung: rot?.rueckmeldung,
+          signal,
+          ausgabe: (zeile) =>
+            melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
+        })
+        melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
+        blocks.push(...(run.blocks ?? []))
+        sessionId = run.sessionId
+        if (run.usageLimit === undefined) break
+        // Usage-Limit: kein Versuch verbraucht; derselbe Versuch startet nach dem Reset neu.
+        if (run.usageLimit === 'guthaben') {
+          // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
+          const abschluss: AbschlussErgebnis = { art: 'entfaellt', grund: 'Tickets offen' }
+          melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
+          await beende(abschluss)
+          return { ...ergebnis, abschluss, angehalten: 'guthaben' }
+        }
+        let reset: number | undefined = run.usageLimit
+        while (reset !== undefined) {
+          melde({ art: 'pause', ticket: nr, reset })
+          await uhr.warte(Math.max(0, reset - uhr.jetzt()) + RESET_PUFFER)
+          reset = await eingabe.agent.erschoepftBis()
+        }
+      }
+      rot = await pruefe(run.erfolg, signal.aborted)
       if (!rot) break
       rote.push(rot.pruefung)
       // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
