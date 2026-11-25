@@ -13,16 +13,13 @@ afterEach(() => {
 const FIXPUNKT = '0123456789abcdef0123456789abcdef01234567'
 
 /** Ein Claude-Adapter gegen ein Fake-`claude` im `PATH`. */
-function mitFake(
-  antworten: ClaudeAntwort[],
-  permissionModus: 'bypassPermissions' | 'auto' = 'bypassPermissions',
-) {
+function mitFake(antworten: ClaudeAntwort[], sandbox = true) {
   const claude = fakeClaude(antworten)
   vi.stubEnv('PATH', `${claude.verzeichnis}${delimiter}${process.env.PATH}`)
   const agent = claudeAgent({
     repoUrl: 'https://github.com/lucas-devries/groundhog',
     token: 'gho_engine',
-    permissionModus,
+    sandbox,
   })
   return { agent, aufrufe: claude.aufrufe }
 }
@@ -100,7 +97,7 @@ test('ein erfolgreicher Run meldet jede Zeile des Stroms, die Session, die Skill
 })
 
 test('ohne Sandbox läuft der Run im Auto-Mode; ab Versuch 2 hängt die Rückmeldung am Prompt', async () => {
-  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }], 'auto')
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }], false)
 
   await agent.run(auftrag({ rueckmeldung: 'Check `npm test` endete mit Exit 1.' }))
 

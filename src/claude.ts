@@ -7,8 +7,11 @@ export interface ClaudeOptionen {
   repoUrl: string
   /** Das `gh`-Token der Engine; der Run bekommt es als `GH_TOKEN`. */
   token: string
-  /** Bypass in der Sandbox, Auto-Mode ohne. */
-  permissionModus: 'bypassPermissions' | 'auto'
+  /**
+   * Läuft der Run in der Sandbox? Davon hängt der Permission-Modus ab: Bypass nur in der Sandbox,
+   * sonst Auto-Mode. Bypass ohne Sandbox gibt es nicht.
+   */
+  sandbox: boolean
 }
 
 /** Der AFK-Hinweis, den jeder Run per `--append-system-prompt` bekommt. */
@@ -39,7 +42,7 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
           'stream-json',
           '--verbose',
           '--permission-mode',
-          optionen.permissionModus,
+          optionen.sandbox ? 'bypassPermissions' : 'auto',
           '--append-system-prompt',
           afkHinweis(auftrag.fixpunkt),
         ],
