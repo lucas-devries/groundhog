@@ -1,23 +1,23 @@
 #!/usr/bin/env node
-import { createRequire } from 'node:module'
 import * as p from '@clack/prompts'
 import { anzeige } from './anzeige.ts'
 import { claudeAgent } from './claude.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
+import { herdr } from './herdr.ts'
 import { init } from './init.ts'
 import { oeffneProtokoll } from './protokoll.ts'
 import { durchreiche } from './sandbox.ts'
 import { starte } from './start.ts'
 import { zeigeTafel } from './tafel.ts'
 import { systemUhr } from './uhr.ts'
-
-const VERSION: string = createRequire(import.meta.url)('../package.json').version
+import { aktualisiere, installiere, neuereVersion, VERSION } from './update.ts'
 
 const HILFE = `groundhog ${VERSION}: arbeitet die Tickets einer Spec ab, ohne Menschen.
 
 Befehle:
   groundhog <spec>     Lauf über die Tickets der Spec mit dieser Issue-Nummer
   groundhog init       Projekt-Konfiguration groundhog.json anlegen oder ändern
+  groundhog update     neueste Version installieren
   groundhog --version  Version zeigen
   groundhog --help     diese Hilfe
 
@@ -39,6 +39,11 @@ if (args.length === 1 && befehl === 'init') {
   if (exitCode === 0) p.outro(meldung)
   else p.cancel(meldung)
   process.exitCode = exitCode
+} else if (args.length === 1 && befehl === 'update') {
+  const { exitCode, meldung } = aktualisiere()
+  if (exitCode === 0) console.log(meldung)
+  else console.error(`groundhog: ${meldung}`)
+  process.exitCode = exitCode
 } else if (args.length === 1 && befehl === '--version') {
   console.log(VERSION)
 } else if (args.length === 1 && befehl === '--help') {
@@ -57,9 +62,11 @@ async function lauf(spec: number): Promise<number> {
     spec,
     dialog: { ...p, warn: p.log.warn },
     istTerminal: process.stdin.isTTY === true,
+    update: { neuereVersion, installiere },
   })
   if (!start.ok) {
-    p.cancel(start.meldung)
+    if (start.exitCode === 0) p.outro(start.meldung)
+    else p.cancel(start.meldung)
     return start.exitCode
   }
   /** Verlässt die Tafel, damit eine Fehlermeldung im normalen Bildschirm stehen bleibt. */
@@ -67,11 +74,15 @@ async function lauf(spec: number): Promise<number> {
   try {
     const { verzeichnis, konfiguration, token } = start
     let zeige: (e: Ereignis) => void = () => {}
+    const herdrMeldung = herdr(process.env, process.stdout.isTTY === true)
     const protokoll = oeffneProtokoll({
       verzeichnis,
       spec,
       start: systemUhr.jetzt(),
-      weiter: (e) => zeige(e),
+      weiter: (e) => {
+        zeige(e)
+        process.stdout.write(herdrMeldung(e) ?? '')
+      },
     })
     if (process.stdout.isTTY) {
       ;({ melde: zeige, schliesse } = zeigeTafel(process.stdout, protokoll.pfad))
