@@ -90,6 +90,7 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     kostenUsd: 0.25,
   })
   expect(ereignisse[9]).toMatchObject({ branch: 'spec/1' })
+  expect(ereignisse[11]).toMatchObject({ abschluss: { art: 'nichts' } })
 })
 
 test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks danach', async () => {
