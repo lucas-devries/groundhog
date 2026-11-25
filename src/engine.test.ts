@@ -35,7 +35,7 @@ async function lauf(
 
 const einTicket = () =>
   new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'] },
+    { nummer: 2, offen: true, labels: ['ready-for-agent'], assignees: [], blocker: [] },
   ])
 
 const commitet: AgentSkript = ({ verzeichnis }) => {
@@ -156,6 +156,7 @@ test.each<[string, AgentSkript]>([
     nummer: 2,
     offen: true,
     assignees: [],
+    blocker: [],
     labels: ['ready-for-human'],
   })
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
@@ -310,8 +311,8 @@ test('hat der Agent das Ticket in einem roten Versuch geschlossen, öffnet die E
 test('nach einem gescheiterten Ticket geht es mit der restlichen Frontier weiter', async () => {
   const { remote, klon } = wegwerfRepo()
   const tracker = new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'] },
-    { nummer: 3, offen: true, assignees: [], labels: ['ready-for-agent'] },
+    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
+    { nummer: 3, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
   ])
 
   const ereignisse = await lauf(
@@ -377,4 +378,22 @@ test('die Check-Ausgabe für den nächsten Run ist von vorn auf 100 Zeilen gekü
   expect(rueckmeldung).toContain('\n51\n')
   expect(rueckmeldung).not.toContain('\n50\n')
   expect(rueckmeldung?.endsWith('\n150')).toBe(true)
+})
+
+test('ein von einem gescheiterten Ticket abhängiges Ticket bleibt liegen', async () => {
+  const { klon } = wegwerfRepo()
+  const tracker = new InMemoryTracker('ich', [
+    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
+    {
+      nummer: 3,
+      offen: true,
+      assignees: [],
+      labels: ['ready-for-agent'],
+      blocker: [{ nummer: 2, offen: true }],
+    },
+  ])
+
+  await lauf(klon, tracker, [() => ({ erfolg: false })], undefined, 1)
+
+  expect(tracker.ticket(3)).toMatchObject({ offen: true, assignees: [] })
 })

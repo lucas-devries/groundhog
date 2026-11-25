@@ -1,12 +1,21 @@
 export interface Ticket {
   nummer: number
   offen: boolean
-  assignees: string[]
   labels: string[]
+  assignees: string[]
+  /** Alle Blocker, auch solche außerhalb der Spec, mit ihrem Zustand. */
+  blocker: Blocker[]
+}
+
+export interface Blocker {
+  nummer: number
+  offen: boolean
 }
 
 /** Der Tracker in der Form, die die Engine braucht. Dahinter: GitHub-Adapter (#32), In-Memory-Tracker. */
 export interface Tracker {
+  /** Der angemeldete Nutzer, auf den die Engine beansprucht. */
+  readonly nutzer: string
   taskGraph(spec: number): Promise<Ticket[]>
   beanspruche(ticket: number): Promise<void>
   schliesse(ticket: number): Promise<void>
@@ -34,8 +43,20 @@ export class InMemoryTracker implements Tracker {
     return structuredClone(this.#finde(nummer))
   }
 
+  /** Ändert ein Ticket von außen, wie ein Mensch im Tracker während des Laufs. */
+  aendere(nummer: number, aenderung: (ticket: Ticket) => void) {
+    aenderung(this.#finde(nummer))
+  }
+
+  /** Blocker aus der Spec tragen den Zustand ihres Tickets; die übrigen den mitgegebenen. */
   async taskGraph(): Promise<Ticket[]> {
-    return structuredClone(this.#tickets)
+    return structuredClone(this.#tickets).map((t) => ({
+      ...t,
+      blocker: t.blocker.map((b) => ({
+        nummer: b.nummer,
+        offen: this.#tickets.find((s) => s.nummer === b.nummer)?.offen ?? b.offen,
+      })),
+    }))
   }
 
   async beanspruche(nummer: number) {
