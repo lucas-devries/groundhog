@@ -162,6 +162,36 @@ export async function starte({
       sandbox = srtSandbox(konfiguration.sandbox.hosts)
     }
 
+    const fehlendeSkills = skills(verzeichnis, versionen)
+    if (fehlendeSkills.length > 0) {
+      const befehl = INSTALLATION.map((a) => a.join(' ')).join(' && ')
+      const installieren =
+        istTerminal &&
+        antwort(
+          await dialog.confirm({
+            message: `Es fehlen die Skills ${fehlendeSkills.join(', ')}. Das Plugin jetzt installieren?`,
+            initialValue: true,
+            active: 'Ja',
+            inactive: 'Nein',
+          }),
+        )
+      if (!installieren) {
+        throw new Abbruch(
+          `Es fehlen die Skills ${fehlendeSkills.join(', ')}. Installiere das Plugin mit:\n${befehl}`,
+        )
+      }
+      // Die Ausgabe der Installation sieht der Mensch direkt; ob sie gelang, zeigt erst die Prüfung.
+      for (const [datei = '', ...args] of INSTALLATION) {
+        spawnSync(datei, args, { cwd: verzeichnis, stdio: 'inherit' })
+      }
+      const weiterFehlend = skills(verzeichnis, versionen)
+      if (weiterFehlend.length > 0) {
+        throw new Abbruch(
+          `Es fehlen auch nach der Installation die Skills ${weiterFehlend.join(', ')}. Installiere das Plugin von Hand mit:\n${befehl}`,
+        )
+      }
+    }
+
     if (!istTerminal) throw new Abbruch('groundhog braucht ein Terminal an stdin für das Menü.')
 
     const auswahl = await menue(dialog, spec, konfiguration, await tracker.taskGraph(spec))
@@ -201,6 +231,48 @@ function werkzeug(
   return lauf.stdout.trim()
 }
 
+/** Strg+C im Menü bricht mit 130 ab. */
+function antwort<T>(wert: T | Abgebrochen): T {
+  if (typeof wert === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
+  return wert
+}
+
+const SKILLS = [
+  'mattpocock-skills:implement',
+  'mattpocock-skills:tdd',
+  'mattpocock-skills:code-review',
+]
+const INSTALLATION = [
+  ['claude', 'plugin', 'marketplace', 'add', 'mattpocock/skills'],
+  ['claude', 'plugin', 'install', 'mattpocock-skills@mattpocock'],
+]
+
+/**
+ * Die fehlenden Skills laut `init`-Event von `claude -p /usage` (kein Modell, keine Kosten); trägt
+ * die Version des Skill-Plugins in `versionen` ein.
+ */
+function skills(verzeichnis: string, versionen: Record<string, string>): string[] {
+  const ausgabe = werkzeug(verzeichnis, 'claude', [
+    '-p',
+    '/usage',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+  ])
+  let init: { skills?: string[]; plugins?: { name: string; version?: string }[] } = {}
+  for (const zeile of ausgabe.split('\n')) {
+    try {
+      const z = JSON.parse(zeile)
+      if (z.type === 'system' && z.subtype === 'init') init = z
+    } catch {
+      // Keine JSON-Zeile.
+    }
+  }
+  const version = init.plugins?.find((p) => p.name === 'mattpocock-skills')?.version
+  if (version) versionen['mattpocock-skills'] = version
+  return SKILLS.filter((s) => !init.skills?.includes(s))
+}
+
 async function menue(
   dialog: MenueDialog,
   spec: number,
@@ -228,10 +300,6 @@ async function menue(
     dialog.warn(
       'Die Sandbox ist aus: Runs laufen im Auto-Mode ohne Grenzen auf diesem Rechner, mit deinem gh-Token.',
     )
-  }
-  const antwort = <T>(wert: T | Abgebrochen): T => {
-    if (typeof wert === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
-    return wert
   }
   const zielBranch = antwort(
     await dialog.select({

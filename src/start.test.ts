@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +13,7 @@ import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { git } from './git.ts'
 import { type MenueDialog, type Start, starte } from './start.ts'
+import { type ClaudeAntwort, fakeClaude } from './testing/fake-claude.ts'
 import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
 import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
 
@@ -41,6 +41,10 @@ const GH_VERSION = { ausgabe: 'gh version 2.94.0 (2026-05-01)\nhttps://github.co
 const TOKEN = { ausgabe: 'gho_geheim\n' }
 const NUTZER = { ausgabe: 'lucas\n' }
 
+const CLAUDE_VERSION: ClaudeAntwort = { aufnahme: 'claude-version.txt' }
+const MIT_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-mit-skills.jsonl' }
+const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-ohne-skills.jsonl' }
+
 const KONFIGURATION = {
   checks: ['npm ci', 'npm test'],
   versuche: 4,
@@ -55,7 +59,7 @@ const KONFIGURATION = {
 function bereit({
   gh = [GH_VERSION, TOKEN, NUTZER, aufnahme('startpruefung-spec-25.json')],
   konfiguration = KONFIGURATION as object | null,
-  claude = true,
+  claude = [CLAUDE_VERSION, MIT_SKILLS] as ClaudeAntwort[] | null,
   ohne = [] as string[],
 } = {}) {
   const { klon } = wegwerfRepo()
@@ -64,10 +68,7 @@ function bereit({
   }
   git(klon, 'push', '-q', 'origin', 'main', 'main:develop')
   const fake = fakeGh([...gh, aufnahme('task-graph-spec-25.json')])
-  if (claude) {
-    writeFileSync(join(fake.verzeichnis, 'claude'), '#!/bin/sh\necho "2.1.0 (Claude Code)"\n')
-    chmodSync(join(fake.verzeichnis, 'claude'), 0o755)
-  }
+  const claudeFake = claude && fakeClaude(claude)
   if (ohne.includes('gh')) rmSync(join(fake.verzeichnis, 'gh'))
   const bin = mkdtempSync(join(tmpdir(), 'bin-'))
   for (const [name, ziel] of [
@@ -76,7 +77,8 @@ function bereit({
   ] as const) {
     if (!ohne.includes(name)) symlinkSync(ziel, join(bin, name))
   }
-  return { klon, fake, pfad: `${fake.verzeichnis}:${bin}` }
+  const pfad = [fake.verzeichnis, claudeFake?.verzeichnis, bin].filter(Boolean)
+  return { klon, fake, claude: claudeFake, pfad: pfad.join(':') }
 }
 
 const sperre = (klon: string) => join(klon, '.git', 'groundhog.lock')
@@ -144,7 +146,10 @@ test('das Menü zeigt den Lauf, fragt Ziel-Branch und Abschluss und sagt, dass k
   expect(ergebnis.token).toBe('gho_geheim')
   expect(ergebnis.repoUrl).toBe('https://github.com/lucas-devries/groundhog')
   expect(ergebnis.konfiguration.versuche).toBe(4)
-  expect(ergebnis.versionen).toEqual({ claude: '2.1.0 (Claude Code)' })
+  expect(ergebnis.versionen).toEqual({
+    claude: '2.1.0 (Claude Code)',
+    'mattpocock-skills': '1.3.2',
+  })
   expect(ergebnis.sandbox).toBeDefined()
   expect(existsSync(sperre(klon))).toBe(true)
   ergebnis.freigeben()
@@ -289,7 +294,7 @@ const FAELLE: Fall[] = [
     bereit: { gh: [GH_VERSION, { exitCode: 1, fehler: 'no oauth token found' }] },
     meldung: ['gh ist nicht angemeldet', 'gh auth login'],
   },
-  { grund: 'claude fehlt', bereit: { claude: false }, meldung: ['claude fehlt im PATH'] },
+  { grund: 'claude fehlt', bereit: { claude: null }, meldung: ['claude fehlt im PATH'] },
   {
     grund: 'die Projekt-Konfiguration fehlt',
     bereit: { konfiguration: null },
@@ -384,4 +389,79 @@ test.each(FAELLE)('der Start bricht vor dem Menü ab, wenn $grund', async (fall)
   if (existsSync(sperre(klon))) {
     expect(JSON.parse(readFileSync(sperre(klon), 'utf8')).pid).not.toBe(process.pid)
   }
+})
+
+const INSTALLATION =
+  'claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock'
+const USAGE = ['-p', '/usage', '--output-format', 'stream-json', '--verbose']
+
+test('fehlen die Skills, fragt das Menü nach der Installation; Nein bricht mit dem Befehl ab', async () => {
+  const { klon, claude, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [false])
+
+  expect(gezeigt).toEqual([
+    {
+      art: 'confirm',
+      message:
+        'Es fehlen die Skills mattpocock-skills:implement, mattpocock-skills:tdd, mattpocock-skills:code-review. Das Plugin jetzt installieren?',
+      initialValue: true,
+      active: 'Ja',
+      inactive: 'Nein',
+    },
+  ])
+  if (ergebnis.ok) throw new Error('Start ist nicht abgebrochen')
+  expect(ergebnis.exitCode).toBe(1)
+  expect(ergebnis.meldung).toContain(INSTALLATION)
+  expect(existsSync(sperre(klon))).toBe(false)
+  expect(claude?.aufrufe().map((a) => a.args)).toEqual([['--version'], USAGE])
+})
+
+test('ohne Terminal und ohne Skills bricht der Start mit dem Installationsbefehl ab', async () => {
+  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [], { istTerminal: false })
+
+  expect(gezeigt).toEqual([])
+  expect(ergebnis).toMatchObject({ ok: false, meldung: expect.stringContaining(INSTALLATION) })
+})
+
+test('nach der Installation prüft groundhog die Skills erneut und startet', async () => {
+  const { klon, claude, pfad } = bereit({
+    claude: [CLAUDE_VERSION, OHNE_SKILLS, {}, {}, MIT_SKILLS],
+  })
+
+  const { ergebnis } = await start({ klon, pfad }, [true, 'develop', 'pr'])
+
+  expect(claude?.aufrufe().map((a) => a.args)).toEqual([
+    ['--version'],
+    USAGE,
+    ['plugin', 'marketplace', 'add', 'mattpocock/skills'],
+    ['plugin', 'install', 'mattpocock-skills@mattpocock'],
+    USAGE,
+  ])
+  expect(ergebnis).toMatchObject({ ok: true, versionen: { 'mattpocock-skills': '1.3.2' } })
+})
+
+test('fehlen die Skills nach der Installation weiter, bricht groundhog ab', async () => {
+  const { klon, pfad } = bereit({
+    claude: [CLAUDE_VERSION, OHNE_SKILLS, {}, { exitCode: 1 }, OHNE_SKILLS],
+  })
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true])
+
+  expect(gezeigt).toHaveLength(1)
+  if (ergebnis.ok) throw new Error('Start ist nicht abgebrochen')
+  expect(ergebnis.exitCode).toBe(1)
+  expect(ergebnis.meldung).toContain('auch nach der Installation')
+  expect(ergebnis.meldung).toContain(INSTALLATION)
+  expect(existsSync(sperre(klon))).toBe(false)
+})
+
+test('Strg+C bei der Frage nach der Installation bricht mit 130 ab', async () => {
+  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+
+  const { ergebnis } = await start({ klon, pfad }, [ABBRUCH])
+
+  expect(ergebnis).toMatchObject({ ok: false, exitCode: 130 })
 })
