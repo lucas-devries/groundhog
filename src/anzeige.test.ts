@@ -156,7 +156,8 @@ test('Zustandswechsel der Tickets, Prüfungen, Blocks und Warnungen erscheinen a
       '',
       '━━ #26 genommen',
       '  ▶ Versuch 1 von 3',
-      '  ⛔ Block: Bash rm -rf ~/.ssh (Deletes files outside the repo)',
+      // Die Begründung steht nur im Protokoll.
+      '  ⛔ Block: Bash rm -rf ~/.ssh',
       '  ⛔ Block: Write /etc/hosts',
       '  ✔ Run erfolgreich',
       '  ✘ Check: npm test',

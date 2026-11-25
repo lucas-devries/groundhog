@@ -62,10 +62,9 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
       case 'versuch-begonnen':
         return [`  ${s.cyan('▶')} Versuch ${e.versuch} von ${e.von}`]
       case 'run-beendet':
+        // Die Begründung eines Blocks steht nur im Protokoll.
         return (e.blocks ?? []).map((b) =>
-          s.gelb(
-            `  ⛔ Block: ${kurz(`${b.tool} ${b.befehl}${b.grund ? ` (${b.grund})` : ''}`, breite - 11)}`,
-          ),
+          s.gelb(`  ⛔ Block: ${kurz(`${b.tool} ${b.befehl}`, breite - 11)}`),
         )
       case 'pruefung':
         return [`  ${e.ok ? s.gruen('✔') : s.rot('✘')} ${e.name}`]
