@@ -29,7 +29,6 @@ const TASK_GRAPH = `query($owner: String!, $repo: String!, $spec: Int!) {
 const START_PRUEFUNG = `query($owner: String!, $repo: String!, $spec: Int!) {
   repository(owner: $owner, name: $repo) {
     url
-    defaultBranchRef { name }
     agent: label(name: "ready-for-agent") { name }
     human: label(name: "ready-for-human") { name }
     issue(number: $spec) { subIssues { totalCount } }
@@ -52,7 +51,6 @@ export interface StartPruefung {
   /** Labels aus `ready-for-agent` und `ready-for-human`, die im Repo fehlen. */
   fehlendeLabels: string[]
   subIssues: number
-  defaultBranch: string
   /** `https://github.com/<owner>/<repo>` */
   url: string
 }
@@ -89,7 +87,7 @@ export class GitHubTracker implements Tracker {
     }))
   }
 
-  /** Prüft vor dem Lauf die beiden Labels und die Sub-Issues der Spec und liest den Default-Branch. */
+  /** Prüft vor dem Lauf die beiden Labels und die Sub-Issues der Spec und liest die Repo-URL. */
   async startPruefung(spec: number): Promise<StartPruefung> {
     const { repository: r } = (await this.#graphql(START_PRUEFUNG, spec)).data
     return {
@@ -98,7 +96,6 @@ export class GitHubTracker implements Tracker {
         ...(r.human ? [] : ['ready-for-human']),
       ],
       subIssues: r.issue.subIssues.totalCount,
-      defaultBranch: r.defaultBranchRef.name,
       url: r.url,
     }
   }

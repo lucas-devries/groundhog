@@ -124,7 +124,7 @@ test('kommentieren und einen PR anlegen geben den Text über stdin an gh', async
   ])
 })
 
-test('die Start-Prüfung meldet fehlende Labels, die Zahl der Sub-Issues und den Default-Branch', async () => {
+test('die Start-Prüfung meldet fehlende Labels, die Zahl der Sub-Issues und die Repo-URL', async () => {
   const { tracker } = await verbunden([
     aufnahme('startpruefung-spec-25.json'),
     aufnahme('startpruefung-ohne-sub-issues-und-human-label.json'),
@@ -133,13 +133,11 @@ test('die Start-Prüfung meldet fehlende Labels, die Zahl der Sub-Issues und den
   expect(await tracker.startPruefung(25)).toEqual({
     fehlendeLabels: [],
     subIssues: 19,
-    defaultBranch: 'main',
     url: 'https://github.com/lucas-devries/groundhog',
   })
   expect(await tracker.startPruefung(32)).toEqual({
     fehlendeLabels: ['ready-for-human'],
     subIssues: 0,
-    defaultBranch: 'main',
     url: 'https://github.com/lucas-devries/groundhog',
   })
 })
