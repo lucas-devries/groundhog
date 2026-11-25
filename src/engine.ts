@@ -110,6 +110,11 @@ const CHECKS_ZEITLIMIT = 15 * MINUTE
 /** Nach dem Reset des Usage-Limits: `resetsAt` ist auf Sekunden gerundet, die Server-Uhr kann abweichen. */
 const RESET_PUFFER = MINUTE
 
+/** Der Integration-Branch einer Spec. */
+export function integrationBranch(spec: number): string {
+  return `spec/${spec}`
+}
+
 /** Wirft die Engine an den Stellen, an denen sie einen Abbruch annimmt. */
 class Abgebrochen extends Error {}
 
@@ -130,7 +135,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   // Die eine Stelle, an der das Token aus Run- und Check-Ausgabe verschwindet. Der Agent wertet
   // nur die gefilterte Zeile aus; alles, was er meldet (auch Blocks), ist damit schon gefiltert.
   const filtere = (text: string) => (eingabe.token ? text.replaceAll(eingabe.token, '***') : text)
-  const integration = `spec/${spec}`
+  const integration = integrationBranch(spec)
   const ergebnis: Omit<LaufErgebnis, 'abschluss'> = { tickets: [] }
   /** Ein gescheiterter Kommentar warnt nur; der Lauf geht weiter. */
   const kommentiere = async (issue: number, text: string) => {
@@ -431,7 +436,7 @@ async function schliesseAb(
   melde: (e: LaufEreignis) => void,
 ): Promise<AbschlussErgebnis> {
   if (!alleGeschlossen) return { art: 'entfaellt', grund: 'Tickets offen' }
-  const integration = `spec/${spec}`
+  const integration = integrationBranch(spec)
   const ziel = auswahl.zielBranch
   switch (auswahl.abschluss) {
     case 'mergen': {

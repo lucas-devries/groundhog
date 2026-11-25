@@ -2,7 +2,7 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
-import type { Auswahl, Ereignis } from './engine.ts'
+import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 
 export interface AnzeigeOptionen {
   /** ANSI-Farben; ohne Terminal aus. */
@@ -26,6 +26,7 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
   }
 
   let begonnen: Extract<Ereignis, { art: 'lauf-begonnen' }> | undefined
+  let integration = ''
   let uebernommen = 0
   let stand: string | undefined
 
@@ -49,6 +50,7 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
         })
       case 'lauf-begonnen': {
         begonnen = e
+        integration = integrationBranch(e.spec)
         const version = e.versionen.groundhog ? ` ${e.versionen.groundhog}` : ''
         const abschluss = ABSCHLUSS[e.auswahl.abschluss]
         return [
@@ -72,7 +74,7 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
         return [s.gelb(`  ⏸ Usage-Limit erreicht, Pause bis ${uhrzeit(e.reset, e.zeit)}`)]
       case 'push':
         // Der Abschluss pusht auch in den Ziel-Branch; der Stand gilt nur dem Integration-Branch.
-        if (e.branch === `spec/${begonnen?.spec}`) stand = e.commit
+        if (e.branch === integration) stand = e.commit
         return [s.matt(`  ↑ ${e.branch} gepusht: ${e.commit.slice(0, 7)}`)]
       case 'ticket-erledigt':
         uebernommen++
@@ -93,7 +95,6 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
         ]
       case 'lauf-beendet': {
         const spec = begonnen?.spec
-        const integration = `spec/${spec}`
         const ziel = begonnen?.auswahl.zielBranch
         const wahl = `Abschluss ${begonnen ? ABSCHLUSS[begonnen.auswahl.abschluss] : ''}`
         const a = e.abschluss

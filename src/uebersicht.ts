@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import type { Block } from './agent.ts'
-import type { Auswahl, Ereignis } from './engine.ts'
+import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 import type { Ticket } from './tracker.ts'
 
 const ABSCHLUSS: Record<Auswahl['abschluss'], string> = {
@@ -86,7 +86,7 @@ export function uebersicht(ereignisse: Ereignis[]): string {
   }
   if (begonnen && beendet) {
     const a = beendet.abschluss
-    const integration = `Integration-Branch spec/${begonnen.spec}`
+    const integration = `Integration-Branch ${integrationBranch(begonnen.spec)}`
     const was =
       a.art === 'gemergt'
         ? `gemergt, Merge-Commit ${a.commit}`

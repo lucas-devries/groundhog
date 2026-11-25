@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import type { Auswahl, Ereignis } from './engine.ts'
+import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 import { git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
@@ -345,7 +345,7 @@ async function menue(
   tickets: Ticket[],
   nutzer: string,
 ): Promise<Auswahl> {
-  const integration = `spec/${spec}`
+  const integration = integrationBranch(spec)
   const zustand = (t: Ticket) => frontierZustand(t, nutzer)
   const mensch = tickets.filter((t) => zustand(t) === 'ready-for-human')
   // Freigegeben, auch wenn noch blockiert oder vergeben.
