@@ -3,6 +3,7 @@ import * as p from '@clack/prompts'
 import { anzeige } from './anzeige.ts'
 import { claudeAgent } from './claude.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
+import { herdr } from './herdr.ts'
 import { init } from './init.ts'
 import { oeffneProtokoll } from './protokoll.ts'
 import { durchreiche } from './sandbox.ts'
@@ -70,12 +71,14 @@ async function lauf(spec: number): Promise<number> {
   try {
     const { verzeichnis, konfiguration, token } = start
     let zeige: (e: Ereignis) => string[] = () => []
+    const herdrMeldung = herdr(process.env, process.stdout.isTTY === true)
     const protokoll = oeffneProtokoll({
       verzeichnis,
       spec,
       start: systemUhr.jetzt(),
       weiter: (e) => {
         for (const zeile of zeige(e)) process.stdout.write(`${zeile}\n`)
+        process.stdout.write(herdrMeldung(e) ?? '')
       },
     })
     zeige = anzeige({
