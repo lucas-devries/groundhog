@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { type AgentSkript, fakeAgent } from './agent.ts'
-import { type Auswahl, fahreLauf, type LaufErgebnis } from './engine.ts'
+import { type Auswahl, type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
 import { git } from './git.ts'
 import { durchreiche } from './sandbox.ts'
 import { commitDatei, wegwerfRepo } from './testing/wegwerf-repo.ts'
@@ -28,6 +28,7 @@ function lauf(
   tracker: InMemoryTracker,
   auswahl: Auswahl,
   skript: AgentSkript[] = [setztUm, setztUm],
+  melde?: (e: Ereignis) => void,
 ): Promise<LaufErgebnis> {
   return fahreLauf({
     spec: 1,
@@ -38,8 +39,27 @@ function lauf(
     agent: fakeAgent(skript),
     sandbox: durchreiche,
     uhr: steuerbareUhr(),
+    melde,
   })
 }
+
+test('Mergen meldet den Push in den Ziel-Branch', async () => {
+  const { remote, klon } = wegwerfRepo()
+  const ereignisse: Ereignis[] = []
+
+  await lauf(
+    klon,
+    new InMemoryTracker('ich', [ticket(2)]),
+    { zielBranch: 'main', abschluss: 'mergen' },
+    [setztUm],
+    (e) => ereignisse.push(e),
+  )
+
+  expect(ereignisse.filter((e) => e.art === 'push').at(-1)).toMatchObject({
+    branch: 'main',
+    commit: git(remote, 'rev-parse', 'main'),
+  })
+})
 
 test('Mergen: Merge-Commit des Integration-Branch in den Ziel-Branch, Push, Spec geschlossen', async () => {
   const { remote, klon } = wegwerfRepo()

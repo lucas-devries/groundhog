@@ -71,7 +71,8 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
       case 'pause':
         return [s.gelb(`  ⏸ Usage-Limit erreicht, Pause bis ${uhrzeit(e.reset, e.zeit)}`)]
       case 'push':
-        stand = e.commit
+        // Der Abschluss pusht auch in den Ziel-Branch; der Stand gilt nur dem Integration-Branch.
+        if (e.branch === `spec/${begonnen?.spec}`) stand = e.commit
         return [s.matt(`  ↑ ${e.branch} gepusht: ${e.commit.slice(0, 7)}`)]
       case 'ticket-erledigt':
         uebernommen++

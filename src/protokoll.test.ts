@@ -73,11 +73,25 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     'pruefung',
     'pruefung',
     'pruefung',
+    'versuch-beendet',
     'push',
     'ticket-erledigt',
     'task-graph',
     'lauf-beendet',
   ])
+  expect(ereignisse.find((e) => e.art === 'versuch-beendet')).toEqual({
+    art: 'versuch-beendet',
+    ticket: 2,
+    versuch: 1,
+    pruefungen: [
+      { name: 'Run erfolgreich', ok: true },
+      { name: 'HEAD auf ticket/2', ok: true },
+      { name: 'neuer Commit seit Fixpunkt', ok: true },
+      { name: 'Arbeitsverzeichnis sauber', ok: true },
+      { name: 'Check: true', ok: true },
+    ],
+    zeit: START,
+  })
   expect(ereignisse[0]).toMatchObject({
     spec: 1,
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
@@ -91,8 +105,8 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     tokens: { input_tokens: 10, output_tokens: 5 },
     kostenUsd: 0.25,
   })
-  expect(ereignisse[10]).toMatchObject({ branch: 'spec/1' })
-  expect(ereignisse[13]).toEqual({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, zeit: START })
+  expect(ereignisse[11]).toMatchObject({ branch: 'spec/1' })
+  expect(ereignisse[14]).toEqual({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, zeit: START })
 })
 
 test('die Übersicht liegt als uebersicht.md im Ordner des Laufs, wie die Engine sie meldet', async () => {

@@ -60,8 +60,7 @@ export function oeffneProtokoll(optionen: {
     }
     if (e.art === 'run-beendet') letzterRun = `ticket-${e.ticket}-run-${e.run}`
     if (e.art === 'pruefung' && e.ausgabe !== undefined) {
-      const { ausgabe, ...ohneAusgabe } = e
-      const befehl = e.name.replace(/^Check: /, '')
+      const { ausgabe, befehl, ...ohneAusgabe } = e
       const text = `$ ${befehl}\n${ausgabe}${ausgabe.endsWith('\n') ? '' : '\n'}`
       schreibe(`${letzterRun}-checks.log`, text, e.zeit)
       e = ohneAusgabe

@@ -216,6 +216,19 @@ test('am Ende stehen die Übersicht, der Stand des Integration-Branch, der Absch
   ])
 })
 
+test('der Push des Merge in den Ziel-Branch ändert nicht den Stand des Integration-Branch', () => {
+  const zeilen = text([
+    begonnen('mergen'),
+    { art: 'push', branch: 'spec/25', commit: 'abcdef1234567890', zeit: 0 },
+    { art: 'ticket-erledigt', ticket: 26, commit: 'abcdef1234567890', versuche: 1, zeit: 0 },
+    { art: 'push', branch: 'main', commit: '1234567890', zeit: 0 },
+    beendet({ art: 'gemergt', commit: '1234567890' }),
+  ])
+
+  expect(zeilen).toContain('  ↑ main gepusht: 1234567')
+  expect(zeilen).toContain('Integration-Branch spec/25: 1 Ticket übernommen, Stand abcdef1')
+})
+
 test.each([
   [
     'mergen',

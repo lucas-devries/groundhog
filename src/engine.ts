@@ -60,11 +60,18 @@ type TicketEreignis = { ticket: number } & (
   | { art: 'run-ausgabe'; run: number; zeile: string }
   /** `run` zählt Runs pro Ticket im Lauf, nicht Versuche. */
   | ({ art: 'run-beendet'; run: number; versuch: number } & RunErgebnis)
-  /** `ausgabe` nur bei Checks: ungekürzt, gefiltert. */
-  | { art: 'pruefung'; name: string; ok: boolean; ausgabe?: string }
+  /** `befehl` und `ausgabe` nur bei Checks; die Ausgabe ungekürzt, gefiltert. */
+  | { art: 'pruefung'; name: string; ok: boolean; befehl?: string; ausgabe?: string }
+  /** Jede Prüfung des Versuchs bis zur ersten roten, in Reihenfolge. */
+  | { art: 'versuch-beendet'; versuch: number; pruefungen: Pruefergebnis[] }
   | { art: 'ticket-erledigt'; commit: string; versuche: number }
   | { art: 'ticket-gescheitert'; versuche: number; pruefung: string }
 )
+
+export interface Pruefergebnis {
+  name: string
+  ok: boolean
+}
 
 export interface TicketErgebnis {
   nummer: number
@@ -166,6 +173,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
           eingabe,
           graph.every((t) => !t.offen),
           kommentiere,
+          melde,
         )
         await beende(abschluss)
         return { ...ergebnis, abschluss }
@@ -179,11 +187,23 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       git(verzeichnis, 'checkout', '-q', '-B', ticketBranch, integration)
       const fixpunkt = git(verzeichnis, 'rev-parse', 'HEAD')
 
-      /** Prüft einen Versuch; liefert bei Rot die rote Prüfung und die Rückmeldung für den nächsten Run. */
+      /**
+       * Prüft einen Versuch und trägt jede Prüfung in `ergebnisse` ein; liefert bei Rot die rote
+       * Prüfung und die Rückmeldung für den nächsten Run.
+       */
       const pruefe = async (
         runErfolg: boolean,
         runAbgelaufen: boolean,
+        ergebnisse: Pruefergebnis[],
       ): Promise<Rot | undefined> => {
+        const ergebnis = (
+          name: string,
+          ok: boolean,
+          check?: { befehl: string; ausgabe: string },
+        ) => {
+          ergebnisse.push({ name, ok })
+          melde({ art: 'pruefung', ticket: nr, name, ok, ...check })
+        }
         const pruefungen: [string, boolean][] = [
           ['Run erfolgreich', runErfolg && !runAbgelaufen],
           [`HEAD auf ${ticketBranch}`, aktuellerBranch(verzeichnis) === ticketBranch],
@@ -193,7 +213,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
           ],
           ['Arbeitsverzeichnis sauber', git(verzeichnis, 'status', '--porcelain') === ''],
         ]
-        for (const [name, ok] of pruefungen) melde({ art: 'pruefung', ticket: nr, name, ok })
+        for (const [name, ok] of pruefungen) ergebnis(name, ok)
         const rot = pruefungen.find(([, ok]) => !ok)
         if (rot) {
           return {
@@ -212,7 +232,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
           const ausgabe = filtere(ausfuehrung.ausgabe)
           const pruefung = `Check: ${check}`
           const ok = exitCode === 0 && !zeitlimit.aborted
-          melde({ art: 'pruefung', ticket: nr, name: pruefung, ok, ausgabe })
+          ergebnis(pruefung, ok, { befehl: check, ausgabe })
           if (!ok) {
             const grund = zeitlimit.aborted
               ? `wurde nach ${CHECKS_ZEITLIMIT / MINUTE} Minuten beendet (Zeitlimit für alle Checks)`
@@ -277,7 +297,9 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
             reset = await eingabe.agent.erschoepftBis()
           }
         }
-        rot = await pruefe(run.erfolg, signal.aborted)
+        const pruefungen: Pruefergebnis[] = []
+        rot = await pruefe(run.erfolg, signal.aborted, pruefungen)
+        melde({ art: 'versuch-beendet', ticket: nr, versuch, pruefungen })
         if (!rot) break
         rote.push(rot.pruefung)
         // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
@@ -398,6 +420,7 @@ async function schliesseAb(
   { spec, auswahl, verzeichnis, tracker }: LaufEingabe,
   alleGeschlossen: boolean,
   kommentiere: (issue: number, text: string) => Promise<void>,
+  melde: (e: LaufEreignis) => void,
 ): Promise<AbschlussErgebnis> {
   if (!alleGeschlossen) return { art: 'entfaellt', grund: 'Tickets offen' }
   const integration = `spec/${spec}`
@@ -417,6 +440,7 @@ async function schliesseAb(
       }
       const commit = git(verzeichnis, 'rev-parse', 'HEAD')
       git(verzeichnis, 'push', '-q', 'origin', `HEAD:refs/heads/${ziel}`)
+      melde({ art: 'push', branch: ziel, commit })
       git(verzeichnis, 'checkout', '-q', integration)
       await tracker.schliesse(spec)
       return { art: 'gemergt', commit }
