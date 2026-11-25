@@ -17,6 +17,15 @@ export interface RunErgebnis {
   /** Tokens des Runs, wie `claude` sie meldet (`usage`). */
   tokens?: Record<string, number>
   kostenUsd?: number
+  /** Für `claude --resume` in Übersicht und Kommentar. */
+  sessionId?: string
+  blocks?: Block[]
+}
+
+/** Ein Aufruf des Agents, der verweigert und nicht ausgeführt wurde. */
+export interface Block {
+  tool: string
+  befehl: string
 }
 
 /** Der Agent: startet einen Run an einem Ticket. Dahinter: Claude-Adapter (#33), Fake-Agent. */

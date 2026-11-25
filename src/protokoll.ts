@@ -66,6 +66,11 @@ export function oeffneProtokoll(optionen: {
       schreibe(`${letzterRun}-checks.log`, text, e.zeit)
       e = ohneAusgabe
     }
+    if (e.art === 'lauf-beendet') {
+      const { uebersicht, ...ohneUebersicht } = e
+      schreibe('uebersicht.md', `${uebersicht}\n`, e.zeit)
+      e = ohneUebersicht as Ereignis
+    }
     schreibe('lauf.jsonl', `${JSON.stringify(e)}\n`, e.zeit)
   }
 
