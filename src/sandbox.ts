@@ -31,3 +31,13 @@ export const durchreiche: Sandbox = {
       kind.on('close', (code) => resolve({ exitCode: code ?? 1, ausgabe }))
     }),
 }
+
+/** Die feste Host-Liste, die jede Sandbox erreicht; `sandbox.hosts` kommt dazu. */
+export const FESTE_HOSTS = [
+  'api.anthropic.com',
+  'claude.ai',
+  'platform.claude.com',
+  'registry.npmjs.org',
+  'api.github.com',
+  'github.com',
+]
