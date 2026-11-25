@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { setTimeout } from 'node:timers/promises'
-import { promisify } from 'node:util'
 import type { Pr, Ticket, Tracker } from './tracker.ts'
-
-const execFileP = promisify(execFile)
 
 /** Wartezeiten vor den Wiederholungen, wenn GitHub nicht erreichbar ist: drei Wiederholungen in gut einer Minute. */
 export const WARTEZEITEN = [5_000, 15_000, 45_000]
@@ -162,18 +159,40 @@ async function gh(
   args: string[],
   eingabe = '',
 ): Promise<string> {
-  for (let versuch = 0; ; versuch++) {
+  for (let wiederholung = 0; ; wiederholung++) {
     try {
-      const lauf = execFileP('gh', args, { cwd: verzeichnis, encoding: 'utf8' })
-      lauf.child.stdin?.end(eingabe)
-      return (await lauf).stdout
+      return await ghProzess(verzeichnis, args, eingabe)
     } catch (fehler) {
       const stderr = String((fehler as { stderr?: string }).stderr ?? '').trim()
-      const wartezeit = WARTEZEITEN[versuch]
+      const wartezeit = WARTEZEITEN[wiederholung]
       if (wartezeit === undefined || !NICHT_ERREICHBAR.test(stderr)) {
         throw new Error(`gh ${args.slice(0, 2).join(' ')} ist gescheitert: ${stderr || fehler}`)
       }
       await warte(wartezeit)
     }
   }
+}
+
+/**
+ * Ein Aufruf von `gh`; liefert stdout, wirft bei Exit ≠ 0 mit `stderr`. Läuft in eigener
+ * Prozessgruppe: Das erste Strg+C bricht nichts ab, also darf es auch `gh` nicht treffen.
+ */
+function ghProzess(verzeichnis: string, args: string[], eingabe: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const kind = spawn('gh', args, { cwd: verzeichnis, stdio: 'pipe', detached: true })
+    let stdout = ''
+    let stderr = ''
+    kind.stdout.setEncoding('utf8').on('data', (d) => {
+      stdout += d
+    })
+    kind.stderr.setEncoding('utf8').on('data', (d) => {
+      stderr += d
+    })
+    kind.on('error', reject)
+    kind.on('close', (code) => {
+      if (code === 0) resolve(stdout)
+      else reject(Object.assign(new Error(`Exit ${code}`), { stderr }))
+    })
+    kind.stdin.end(eingabe)
+  })
 }

@@ -2,6 +2,7 @@ import { delimiter } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { GitHubTracker } from './github.ts'
 import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
+import { eigeneProzessgruppe, meldetProzessgruppe } from './testing/prozessgruppe.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -179,4 +180,12 @@ test('eine Antwort von GitHub wie ein fehlendes Issue wird nicht wiederholt', as
 
   await expect(tracker.taskGraph(99999)).rejects.toThrow(/Could not resolve to an Issue/)
   expect(wartezeiten).toEqual([])
+})
+
+test('gh läuft in einer eigenen Prozessgruppe, damit das erste Strg+C es nicht beendet', async () => {
+  vi.stubEnv('PATH', `${meldetProzessgruppe('gh')}${delimiter}${process.env.PATH}`)
+
+  const tracker = await GitHubTracker.verbinde({ verzeichnis: process.cwd() })
+
+  expect(tracker.nutzer).not.toBe(eigeneProzessgruppe())
 })
