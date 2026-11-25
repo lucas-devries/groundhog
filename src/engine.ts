@@ -10,6 +10,13 @@ export interface Auswahl {
   abschluss: 'mergen' | 'pr' | 'nichts'
 }
 
+/** Der Name jedes Abschlusses, wie Menü und Anzeige ihn zeigen. */
+export const ABSCHLUSS: Record<Auswahl['abschluss'], string> = {
+  mergen: 'Mergen',
+  pr: 'PR',
+  nichts: 'Nichts',
+}
+
 export interface LaufEingabe {
   spec: number
   auswahl: Auswahl

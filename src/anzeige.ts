@@ -2,7 +2,7 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
-import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
+import { ABSCHLUSS, type Ereignis, integrationBranch } from './engine.ts'
 
 export interface AnzeigeOptionen {
   /** ANSI-Farben; ohne Terminal aus. */
@@ -127,12 +127,6 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
         return []
     }
   }
-}
-
-const ABSCHLUSS: Record<Auswahl['abschluss'], string> = {
-  mergen: 'Mergen',
-  pr: 'PR',
-  nichts: 'Nichts',
 }
 
 /** HH:MM in lokaler Zeit; liegt `ms` an einem anderen Tag als `jetzt`, mit Datum davor. */

@@ -1,13 +1,7 @@
 import { hostname } from 'node:os'
 import type { Block } from './agent.ts'
-import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
+import { ABSCHLUSS, type Ereignis, integrationBranch } from './engine.ts'
 import type { Ticket } from './tracker.ts'
-
-const ABSCHLUSS: Record<Auswahl['abschluss'], string> = {
-  mergen: 'Mergen',
-  pr: 'PR',
-  nichts: 'Nichts',
-}
 
 /** Die Übersicht eines Laufs als Markdown, allein aus den Ereignissen der Engine. */
 export function uebersicht(ereignisse: Ereignis[]): string {

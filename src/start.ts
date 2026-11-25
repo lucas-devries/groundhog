@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
+import { ABSCHLUSS, type Auswahl, type Ereignis, integrationBranch } from './engine.ts'
 import { git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
@@ -380,9 +380,13 @@ async function menue(
     await dialog.select({
       message: `Abschluss: Was geschieht mit ${integration}, sobald alle Tickets geschlossen sind?`,
       options: [
-        { value: 'mergen', label: 'Mergen', hint: `groundhog mergt nach ${zielBranch} und pusht` },
-        { value: 'pr', label: 'PR', hint: `groundhog öffnet einen PR nach ${zielBranch}` },
-        { value: 'nichts', label: 'Nichts', hint: `${integration} bleibt stehen` },
+        {
+          value: 'mergen',
+          label: ABSCHLUSS.mergen,
+          hint: `groundhog mergt nach ${zielBranch} und pusht`,
+        },
+        { value: 'pr', label: ABSCHLUSS.pr, hint: `groundhog öffnet einen PR nach ${zielBranch}` },
+        { value: 'nichts', label: ABSCHLUSS.nichts, hint: `${integration} bleibt stehen` },
       ],
       initialValue: zielBranch === 'main' ? 'pr' : 'mergen',
     }),
