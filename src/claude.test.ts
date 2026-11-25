@@ -12,14 +12,19 @@ afterEach(() => {
 
 const FIXPUNKT = '0123456789abcdef0123456789abcdef01234567'
 
-/** Ein Claude-Adapter gegen ein Fake-`claude` im `PATH`. */
+/**
+ * Ein Claude-Adapter gegen ein Fake-`claude` im `PATH`. Die Fake-Sandbox startet keine echte: Sie
+ * setzt nur `IN_FAKE_SRT` auf das Arbeitsverzeichnis, das das Fake-`claude` festhält.
+ */
 function mitFake(antworten: ClaudeAntwort[], sandbox = true) {
   const claude = fakeClaude(antworten)
   vi.stubEnv('PATH', `${claude.verzeichnis}${delimiter}${process.env.PATH}`)
   const agent = claudeAgent({
     repoUrl: 'https://github.com/lucas-devries/groundhog',
     token: 'gho_engine',
-    sandbox,
+    sandbox: sandbox
+      ? { umhuelle: (befehl, verzeichnis) => ['env', `IN_FAKE_SRT=${verzeichnis}`, ...befehl] }
+      : undefined,
   })
   return { agent, aufrufe: claude.aufrufe }
 }
@@ -68,7 +73,7 @@ test('der Run bekommt das gh-Token der Engine und keinen Retry-Watchdog und kein
 
   await agent.run(auftrag())
 
-  expect(aufrufe()[0]?.env).toEqual({ GH_TOKEN: 'gho_engine' })
+  expect(aufrufe()[0]?.env).toEqual({ GH_TOKEN: 'gho_engine', IN_FAKE_SRT: expect.any(String) })
 })
 
 // Aufnahme: der erste Run aus prototype/cli-oberflaeche/run.jsonl (echter Run, CLI 2.1.331).
@@ -96,12 +101,25 @@ test('ein erfolgreicher Run meldet jede Zeile des Stroms, die Session, die Skill
   expect(ergebnis.usageLimit).toBeUndefined()
 })
 
+test('in der Sandbox läuft der ganze claude-Prozess darin, mit Bypass', async () => {
+  const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }])
+  const a = auftrag()
+
+  await agent.run(a)
+
+  const [aufruf] = aufrufe()
+  expect(aufruf?.env.IN_FAKE_SRT).toBe(a.verzeichnis)
+  expect(aufruf?.cwd).toBe(a.verzeichnis)
+  expect(aufruf?.args.join(' ')).toContain('--permission-mode bypassPermissions')
+})
+
 test('ohne Sandbox läuft der Run im Auto-Mode; ab Versuch 2 hängt die Rückmeldung am Prompt', async () => {
   const { agent, aufrufe } = mitFake([{ aufnahme: 'claude-run-gruen.jsonl' }], false)
 
   await agent.run(auftrag({ rueckmeldung: 'Check `npm test` endete mit Exit 1.' }))
 
   const args = aufrufe()[0]?.args ?? []
+  expect(aufrufe()[0]?.env.IN_FAKE_SRT).toBeUndefined()
   expect(args.join(' ')).toContain('--permission-mode auto')
   expect(args[1]).toBe(
     '/mattpocock-skills:implement https://github.com/lucas-devries/groundhog/issues/33\n\nCheck `npm test` endete mit Exit 1.',
