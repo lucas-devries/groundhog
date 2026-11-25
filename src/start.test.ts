@@ -174,6 +174,28 @@ test('aus einem Unterverzeichnis startet der Lauf im Repo-Root', async () => {
   expect(ergebnis).toMatchObject({ ok: true, verzeichnis: realpathSync(klon) })
 })
 
+test('der Start legt den Ordner des Protokolls vor dem Menü an', async () => {
+  const { klon, pfad } = bereit()
+
+  const { ergebnis } = await start({ klon, pfad }, ['main', 'pr'])
+
+  if (!ergebnis.ok) throw new Error(ergebnis.meldung)
+  expect(ergebnis.protokoll.pfad).toMatch(/\.git\/groundhog\/laeufe\/\d{8}-\d{6}-spec-25$/)
+  expect(existsSync(ergebnis.protokoll.pfad)).toBe(true)
+})
+
+test('lässt sich der Ordner des Protokolls nicht anlegen, bricht der Start vor dem Menü ab', async () => {
+  const { klon, pfad } = bereit()
+  writeFileSync(join(klon, '.git/groundhog'), 'kein Ordner')
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [])
+
+  expect(gezeigt).toEqual([])
+  expect(ergebnis).toMatchObject({ ok: false, exitCode: 1 })
+  expect(!ergebnis.ok && ergebnis.meldung).toMatch(/^Der Ordner des Protokolls lässt sich nicht/)
+  expect(existsSync(sperre(klon))).toBe(false)
+})
+
 test('bei main ist PR vorausgewählt', async () => {
   const { klon, pfad } = bereit()
 

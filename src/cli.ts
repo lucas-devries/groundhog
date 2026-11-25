@@ -6,7 +6,6 @@ import { claudeAgent } from './claude.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
 import { herdr } from './herdr.ts'
 import { init } from './init.ts'
-import { oeffneProtokoll } from './protokoll.ts'
 import { durchreiche } from './sandbox.ts'
 import { starte } from './start.ts'
 import { zeigeTafel } from './tafel.ts'
@@ -58,12 +57,18 @@ if (args.length === 1 && befehl === 'init') {
 
 async function lauf(spec: number): Promise<number> {
   p.intro(`groundhog ${VERSION}`)
+  let zeige: (e: Ereignis) => void = () => {}
+  const herdrMeldung = herdr(process.env, process.stdout.isTTY === true)
   const start = await starte({
     verzeichnis: process.cwd(),
     spec,
     dialog: { ...p, warn: p.log.warn },
     istTerminal: process.stdin.isTTY === true,
     update: { neuereVersion, installiere },
+    weiter: (e) => {
+      zeige(e)
+      process.stdout.write(herdrMeldung(e) ?? '')
+    },
   })
   if (!start.ok) {
     if (start.exitCode === 0) p.outro(start.meldung)
@@ -75,18 +80,7 @@ async function lauf(spec: number): Promise<number> {
   const signale = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
   let empfange = (_: NodeJS.Signals) => {}
   try {
-    const { verzeichnis, konfiguration, token } = start
-    let zeige: (e: Ereignis) => void = () => {}
-    const herdrMeldung = herdr(process.env, process.stdout.isTTY === true)
-    const protokoll = oeffneProtokoll({
-      verzeichnis,
-      spec,
-      start: systemUhr.jetzt(),
-      weiter: (e) => {
-        zeige(e)
-        process.stdout.write(herdrMeldung(e) ?? '')
-      },
-    })
+    const { verzeichnis, konfiguration, token, protokoll } = start
     if (process.stdout.isTTY) {
       ;({ melde: zeige, schliesse } = zeigeTafel(process.stdout, protokoll.pfad))
     } else {

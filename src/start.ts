@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import type { Auswahl } from './engine.ts'
+import type { Auswahl, Ereignis } from './engine.ts'
 import { git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
+import { oeffneProtokoll, type Protokoll } from './protokoll.ts'
 import { type SrtSandbox, sandboxFehlt, srtSandbox } from './sandbox.ts'
 import { nimmSperre } from './sperre.ts'
 
@@ -42,6 +43,8 @@ export interface StartOptionen {
     /** Installiert den Tag; wirft mit Meldung, wenn das scheitert. */
     installiere: (tag: string) => void
   }
+  /** Bekommt jedes Ereignis, nachdem das Protokoll es geschrieben hat. */
+  weiter?: (ereignis: Ereignis) => void
 }
 
 /** Alles, was der Lauf nach dem Menü braucht. */
@@ -58,6 +61,7 @@ export interface Bereit {
   /** Die `srt`-Sandbox; `undefined` nur bei `sandbox.aus`. */
   sandbox: SrtSandbox | undefined
   versionen: Record<string, string>
+  protokoll: Protokoll
   /** Gibt die Sperre frei; bei jedem Ende aufrufen. */
   freigeben: () => void
 }
@@ -76,8 +80,8 @@ class Abbruch extends Error {
 }
 
 /**
- * Start eines Laufs bis zum Ende des Menüs: Start-Prüfungen, Sperre, Menü. Verändert weder Repo
- * noch Tracker; bei jedem Abbruch ist die Sperre wieder frei.
+ * Start eines Laufs bis zum Ende des Menüs: Start-Prüfungen, Sperre, Protokoll, Menü. Verändert
+ * weder Repo noch Tracker; bei jedem Abbruch ist die Sperre wieder frei.
  */
 export async function starte({
   verzeichnis: aufruf,
@@ -86,6 +90,7 @@ export async function starte({
   istTerminal,
   sandboxFehlt: fehlt = sandboxFehlt,
   update,
+  weiter,
 }: StartOptionen): Promise<Start> {
   let freigeben = () => {}
   try {
@@ -219,6 +224,15 @@ export async function starte({
 
     if (!istTerminal) throw new Abbruch('groundhog braucht ein Terminal an stdin für das Menü.')
 
+    let protokoll: Protokoll
+    try {
+      protokoll = oeffneProtokoll({ verzeichnis, spec, start: Date.now(), weiter })
+    } catch (fehler) {
+      throw new Abbruch(
+        `Der Ordner des Protokolls lässt sich nicht anlegen: ${(fehler as Error).message}`,
+      )
+    }
+
     const tag = update?.neuereVersion()
     if (tag) {
       const ja = await dialog.confirm({
@@ -245,6 +259,7 @@ export async function starte({
       repoUrl: pruefung.url,
       sandbox,
       versionen,
+      protokoll,
       freigeben,
     }
   } catch (fehler) {
