@@ -76,7 +76,7 @@ export function uebersicht(ereignisse: Ereignis[]): string {
 
   const kopf: string[] = []
   if (begonnen) {
-    kopf.push(`# Übersicht Spec #${begonnen.spec}`, '', `- Beginn: ${uhrzeit(begonnen.zeit)}`)
+    kopf.push(`# Übersicht Spec #${begonnen.spec}`, '', `- Beginn: ${zeitpunkt(begonnen.zeit)}`)
   }
   if (begonnen && beendet) {
     const a = beendet.abschluss
@@ -92,7 +92,7 @@ export function uebersicht(ereignisse: Ereignis[]): string {
               ? integration
               : `nichts, weil ${a.grund}`
     kopf.push(
-      `- Ende: ${uhrzeit(beendet.zeit)}`,
+      `- Ende: ${zeitpunkt(beendet.zeit)}`,
       `- Dauer: ${dauer(beendet.zeit - begonnen.zeit)}`,
       `- Ziel-Branch: ${begonnen.auswahl.zielBranch}`,
       `- Abschluss: ${ABSCHLUSS[begonnen.auswahl.abschluss]} → ${was}`,
@@ -149,7 +149,7 @@ interface TicketVerlauf {
 }
 
 /** JJJJ-MM-TT HH:MM:SS in lokaler Zeit. */
-function uhrzeit(ms: number): string {
+function zeitpunkt(ms: number): string {
   return new Date(ms).toLocaleString('sv-SE')
 }
 

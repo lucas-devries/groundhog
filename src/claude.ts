@@ -48,7 +48,7 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
         '--append-system-prompt',
         afkHinweis(auftrag.fixpunkt),
       ]
-      const exitCode = await starte(
+      const exitCode = await starteProzess(
         optionen.sandbox?.umhuelle(aufruf, auftrag.verzeichnis) ?? aufruf,
         { verzeichnis: auftrag.verzeichnis, env, signal: auftrag.signal },
         (zeile) => strom.lies(auftrag.ausgabe(zeile)),
@@ -59,7 +59,7 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
     // `/usage` ruft kein Modell und kein Tool auf und kostet nichts; es läuft ohne Sandbox.
     async erschoepftBis() {
       let bis: number | undefined
-      await starte(
+      await starteProzess(
         ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose'],
         { verzeichnis: process.cwd(), env },
         (zeile) => {
@@ -92,7 +92,7 @@ function umgebung(token: string): NodeJS.ProcessEnv {
  * von stdout und stderr weiter. Bricht `signal` ab, stirbt die ganze Prozessgruppe. Liefert den
  * Exit-Code (`null` nach Signal).
  */
-function starte(
+function starteProzess(
   [datei = '', ...args]: string[],
   {
     verzeichnis,

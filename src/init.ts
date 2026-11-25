@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { git } from './git.ts'
 import { DATEI, type Konfiguration, leseKonfiguration, VERSUCHE_STANDARD } from './konfiguration.ts'
 import { FESTE_HOSTS } from './sandbox.ts'
+import type { StrgC } from './start.ts'
 
-type Abgebrochen = symbol
 type Pruefung = (wert: string | undefined) => string | undefined
 
 /** Die Fragen von `init`. Passt zu `@clack/prompts`; ein Symbol als Antwort heißt Strg+C. */
@@ -14,24 +14,20 @@ export interface Dialog {
     message: string
     initialValue: string
     validate: Pruefung
-  }): Promise<string | Abgebrochen>
-  text(o: {
-    message: string
-    initialValue: string
-    validate?: Pruefung
-  }): Promise<string | Abgebrochen>
+  }): Promise<string | StrgC>
+  text(o: { message: string; initialValue: string; validate?: Pruefung }): Promise<string | StrgC>
   multiselect(o: {
     message: string
     options: { value: string; label: string }[]
     initialValues: string[]
     required: true
-  }): Promise<string[] | Abgebrochen>
+  }): Promise<string[] | StrgC>
   confirm(o: {
     message: string
     initialValue: boolean
     active: string
     inactive: string
-  }): Promise<boolean | Abgebrochen>
+  }): Promise<boolean | StrgC>
   info(text: string): void
 }
 

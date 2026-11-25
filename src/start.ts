@@ -9,7 +9,8 @@ import { type SrtSandbox, sandboxFehlt, srtSandbox } from './sandbox.ts'
 import { nimmSperre } from './sperre.ts'
 import { frontierZustand, type Ticket } from './tracker.ts'
 
-type Abgebrochen = symbol
+/** Die Antwort von `@clack/prompts` auf Strg+C. */
+export type StrgC = symbol
 
 /** Die Teile von `@clack/prompts`, die das Menü braucht; ein Symbol als Antwort heißt Strg+C. */
 export interface MenueDialog {
@@ -20,13 +21,13 @@ export interface MenueDialog {
     message: string
     options: { value: string; label: string; hint?: string }[]
     initialValue: string
-  }): Promise<string | Abgebrochen>
+  }): Promise<string | StrgC>
   confirm(o: {
     message: string
     initialValue: boolean
     active: string
     inactive: string
-  }): Promise<boolean | Abgebrochen>
+  }): Promise<boolean | StrgC>
 }
 
 export interface StartOptionen {
@@ -298,7 +299,7 @@ function werkzeug(
 }
 
 /** Strg+C im Menü bricht mit 130 ab. */
-function antwort<T>(wert: T | Abgebrochen): T {
+function antwort<T>(wert: T | StrgC): T {
   if (typeof wert === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
   return wert
 }

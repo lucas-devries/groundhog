@@ -139,7 +139,7 @@ export function uhrzeit(ms: number, jetzt: number): string {
 }
 
 type Stil = ReturnType<typeof stil>
-const hell = createEmphasize(common)
+const syntaxfarben = createEmphasize(common)
 
 export function stil(farbe: boolean) {
   const ansi = (code: number) => (t: string) => (farbe ? `\x1b[${code}m${t}\x1b[0m` : t)
@@ -153,7 +153,9 @@ export function stil(farbe: boolean) {
     /** Syntaxfarben nach der Endung der Datei. */
     code: (datei: string, t: string) => {
       const sprache = extname(datei).slice(1)
-      return farbe && sprache && hell.registered(sprache) ? hell.highlight(sprache, t).value : t
+      return farbe && sprache && syntaxfarben.registered(sprache)
+        ? syntaxfarben.highlight(sprache, t).value
+        : t
     },
   }
 }
