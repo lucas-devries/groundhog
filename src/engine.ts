@@ -115,7 +115,8 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     if (ereignis.art !== 'run-ausgabe') verlauf.push(ereignis)
     eingabe.melde?.(ereignis)
   }
-  // Die eine Stelle, an der das Token aus Run- und Check-Ausgabe verschwindet.
+  // Die eine Stelle, an der das Token aus Run- und Check-Ausgabe verschwindet. Der Agent wertet
+  // nur die gefilterte Zeile aus; alles, was er meldet (auch Blocks), ist damit schon gefiltert.
   const filtere = (text: string) => (eingabe.token ? text.replaceAll(eingabe.token, '***') : text)
   const integration = `spec/${spec}`
   const ergebnis: Omit<LaufErgebnis, 'abschluss'> = { tickets: [] }
@@ -249,8 +250,11 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
             fixpunkt,
             rueckmeldung: rot?.rueckmeldung,
             signal: AbortSignal.any([signal, abbruch]),
-            ausgabe: (zeile) =>
-              melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
+            ausgabe: (roh) => {
+              const zeile = filtere(roh)
+              melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile })
+              return zeile
+            },
           })
           melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
           blocks.push(...(run.blocks ?? []))

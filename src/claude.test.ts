@@ -36,7 +36,10 @@ function auftrag(teil: Partial<RunAuftrag> = {}): RunAuftrag & { zeilen: string[
     verzeichnis: mkdtempSync(join(tmpdir(), 'claude-run-')),
     fixpunkt: FIXPUNKT,
     signal: new AbortController().signal,
-    ausgabe: (zeile) => zeilen.push(zeile),
+    ausgabe: (zeile) => {
+      zeilen.push(zeile)
+      return zeile
+    },
     zeilen,
     ...teil,
   }
@@ -148,6 +151,16 @@ test('Blocks kommen mit Tool, Befehl und Begründung im Ergebnis an, jeder nur e
     { tool: 'Bash', befehl: 'rm -rf ~/.ssh', grund: 'Deletes files outside the working directory' },
     { tool: 'Write', befehl: '/etc/hosts' },
   ])
+})
+
+test('die Blocks entstehen aus der Zeile, wie die Engine sie gefiltert zurückgibt', async () => {
+  const { agent } = mitFake([{ aufnahme: 'claude-blocks.jsonl' }])
+
+  const ergebnis = await agent.run(
+    auftrag({ ausgabe: (zeile) => zeile.replaceAll('~/.ssh', '***') }),
+  )
+
+  expect(ergebnis.blocks?.[0]).toMatchObject({ befehl: 'rm -rf ***' })
 })
 
 // Aufnahme: Ausgabe von claude 2.1.331 gegen den Mock aus research/usage-limit-erkennung.

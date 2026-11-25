@@ -158,12 +158,14 @@ test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks da
 test('das gh-Token erscheint weder im Protokoll noch in der Rückmeldung an den nächsten Run', async () => {
   const { klon } = wegwerfRepo()
   let rueckmeldung: string | undefined
+  let zurueck: string | undefined
 
   const pfad = await lauf(
     klon,
     [
       (auftrag) => {
-        auftrag.ausgabe('{"text":"GH_TOKEN=ghp_geheim"}')
+        // Der Adapter wertet nur die gefilterte Zeile aus, etwa für die Blocks.
+        zurueck = auftrag.ausgabe('{"text":"GH_TOKEN=ghp_geheim"}')
         return commitet(auftrag)
       },
       (auftrag) => {
@@ -179,6 +181,7 @@ test('das gh-Token erscheint weder im Protokoll noch in der Rückmeldung an den 
     .map((d) => readFileSync(join(pfad, d), 'utf8'))
     .join('\n')
   expect(alles).not.toContain('ghp_geheim')
+  expect(zurueck).toBe('{"text":"GH_TOKEN=***"}')
   expect(readFileSync(join(pfad, 'ticket-2-run-1.jsonl'), 'utf8')).toContain('GH_TOKEN=***')
   expect(readFileSync(join(pfad, 'ticket-2-run-1-checks.log'), 'utf8')).toContain('token ***')
   expect(rueckmeldung).toContain('token ***')

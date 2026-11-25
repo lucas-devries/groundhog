@@ -10,8 +10,11 @@ export interface RunAuftrag {
   rueckmeldung?: string
   /** Bricht ab, wenn das Zeitlimit des Runs erreicht ist; der Adapter beendet dann den Run. */
   signal: AbortSignal
-  /** Nimmt jede Zeile der rohen Ausgabe des Runs entgegen (bei Claude: `stream-json`). */
-  ausgabe: (zeile: string) => void
+  /**
+   * Nimmt jede Zeile der rohen Ausgabe des Runs entgegen (bei Claude: `stream-json`) und liefert
+   * sie gefiltert zurück. Der Adapter wertet nur die gefilterte Zeile aus, etwa für die Blocks.
+   */
+  ausgabe: (zeile: string) => string
 }
 
 export interface RunErgebnis {

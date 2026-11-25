@@ -51,10 +51,7 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
       const exitCode = await starte(
         optionen.sandbox?.umhuelle(aufruf, auftrag.verzeichnis) ?? aufruf,
         { verzeichnis: auftrag.verzeichnis, env, signal: auftrag.signal },
-        (zeile) => {
-          auftrag.ausgabe(zeile)
-          strom.lies(zeile)
-        },
+        (zeile) => strom.lies(auftrag.ausgabe(zeile)),
       )
       return strom.ergebnis(exitCode)
     },
