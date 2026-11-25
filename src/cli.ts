@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as p from '@clack/prompts'
+import { abbruchWaechter } from './abbruch.ts'
 import { anzeige } from './anzeige.ts'
 import { claudeAgent } from './claude.ts'
 import { type Ereignis, fahreLauf } from './engine.ts'
@@ -71,6 +72,8 @@ async function lauf(spec: number): Promise<number> {
   }
   /** Verlässt die Tafel, damit eine Fehlermeldung im normalen Bildschirm stehen bleibt. */
   let schliesse = () => {}
+  const signale = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
+  let empfange = (_: NodeJS.Signals) => {}
   try {
     const { verzeichnis, konfiguration, token } = start
     let zeige: (e: Ereignis) => void = () => {}
@@ -92,6 +95,17 @@ async function lauf(spec: number): Promise<number> {
         for (const zeile of zeilen(e)) process.stdout.write(`${zeile}\n`)
       }
     }
+    const waechter = abbruchWaechter({
+      uhr: systemUhr,
+      hinweis: (text) => protokoll.melde({ art: 'warnung', text, zeit: systemUhr.jetzt() }),
+      // Signal während des Aufräumens: sofort raus; die Tafel räumt im 'exit'-Handler auf.
+      hart: () => {
+        start.freigeben()
+        process.exit(130)
+      },
+    })
+    empfange = waechter.empfange
+    for (const s of signale) process.on(s, empfange)
     const ergebnis = await fahreLauf({
       spec,
       auswahl: start.auswahl,
@@ -107,7 +121,9 @@ async function lauf(spec: number): Promise<number> {
       sandbox: start.sandbox ?? durchreiche,
       uhr: systemUhr,
       melde: protokoll.melde,
+      abbruch: waechter.signal,
     })
+    if (ergebnis.angehalten === 'abgebrochen') return 130
     if (ergebnis.angehalten) return 1
     return ergebnis.tickets.some((t) => t.ergebnis === 'gescheitert') ? 2 : 0
   } catch (fehler) {
@@ -115,6 +131,7 @@ async function lauf(spec: number): Promise<number> {
     console.error(`groundhog: Lauf abgebrochen: ${(fehler as Error).message}`)
     return 1
   } finally {
+    for (const s of signale) process.off(s, empfange)
     start.freigeben()
   }
 }
