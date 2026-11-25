@@ -29,6 +29,8 @@ export interface LaufEingabe {
   sandbox: Sandbox
   uhr: Uhr
   melde?: (ereignis: Ereignis) => void
+  /** Geordneter Abbruch: Die Engine beendet den Run, räumt auf und endet ohne Kommentar an der Spec. */
+  abbruch?: AbortSignal
 }
 
 export type Ereignis = (LaufEreignis | TicketEreignis) & { zeit: number }
@@ -80,13 +82,13 @@ export type AbschlussErgebnis =
   | { art: 'konflikt' }
   | { art: 'pr'; url: string }
   | { art: 'nichts' }
-  | { art: 'entfaellt'; grund: 'Tickets offen' }
+  | { art: 'entfaellt'; grund: 'Tickets offen' | 'abgebrochen' }
 
 export interface LaufErgebnis {
   tickets: TicketErgebnis[]
   abschluss: AbschlussErgebnis
-  /** Gesetzt, wenn der Lauf vorzeitig angehalten hat: Am Usage-Limit fehlt Guthaben. */
-  angehalten?: 'guthaben'
+  /** Gesetzt, wenn der Lauf vorzeitig angehalten hat: Am Usage-Limit fehlt Guthaben, oder abgebrochen. */
+  angehalten?: 'guthaben' | 'abgebrochen'
 }
 
 const MINUTE = 60_000
@@ -96,9 +98,16 @@ const CHECKS_ZEITLIMIT = 15 * MINUTE
 /** Nach dem Reset des Usage-Limits: `resetsAt` ist auf Sekunden gerundet, die Server-Uhr kann abweichen. */
 const RESET_PUFFER = MINUTE
 
+/** Wirft die Engine an den Stellen, an denen sie einen Abbruch annimmt. */
+class Abgebrochen extends Error {}
+
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   const { spec, auswahl, verzeichnis, tracker, uhr, versuche = 3 } = eingabe
+  const abbruch = eingabe.abbruch ?? new AbortController().signal
+  const halt = () => {
+    if (abbruch.aborted) throw new Abgebrochen()
+  }
   /** Was die Übersicht braucht: alle Ereignisse ohne die rohe Ausgabe der Runs. */
   const verlauf: Ereignis[] = []
   const melde = (e: LaufEreignis | TicketEreignis) => {
@@ -130,197 +139,238 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   }
   melde({ art: 'lauf-begonnen', spec, auswahl, versionen: eingabe.versionen ?? {} })
 
+  // Nach einem Abbruch zurück hierhin; ein ticket/*-Rest wird dabei gelöscht.
+  let startpunkt = aktuellerBranch(verzeichnis) || git(verzeichnis, 'rev-parse', 'HEAD')
+  if (startpunkt.startsWith('ticket/')) startpunkt = integration
   git(verzeichnis, 'fetch', '-q', 'origin')
-  if (!branchExistiert(verzeichnis, integration)) {
+  if (git(verzeichnis, 'branch', '-r', '--list', `origin/${integration}`)) {
+    // Maßgeblich ist der gepushte Stand.
+    git(verzeichnis, 'checkout', '-q', '--no-track', '-B', integration, `origin/${integration}`)
+  } else if (!branchExistiert(verzeichnis, integration)) {
     git(verzeichnis, 'branch', '-q', '--no-track', integration, `origin/${auswahl.zielBranch}`)
   }
 
-  while (true) {
-    const graph = await tracker.taskGraph(spec)
-    melde({ art: 'task-graph', tickets: graph })
-    const ticket = graph
-      .filter((t) => bearbeitbar(t, tracker.nutzer))
-      .sort((a, b) => a.nummer - b.nummer)[0]
-    if (!ticket) {
-      const abschluss = await schliesseAb(
-        eingabe,
-        graph.every((t) => !t.offen),
-        kommentiere,
-      )
-      await beende(abschluss)
-      return { ...ergebnis, abschluss }
-    }
-    const nr = ticket.nummer
-    const ticketBranch = `ticket/${nr}`
-
-    await tracker.beanspruche(nr)
-    melde({ art: 'ticket-genommen', ticket: nr })
-    git(verzeichnis, 'checkout', '-q', '-B', ticketBranch, integration)
-    const fixpunkt = git(verzeichnis, 'rev-parse', 'HEAD')
-    const loescheTicketBranch = () => {
-      git(verzeichnis, 'branch', '-q', '-D', ticketBranch)
-      if (git(verzeichnis, 'ls-remote', '--heads', 'origin', ticketBranch)) {
-        git(verzeichnis, 'push', '-q', 'origin', '--delete', ticketBranch)
+  /** Das beanspruchte, noch nicht fertige Ticket. */
+  let genommen: number | undefined
+  try {
+    while (true) {
+      const graph = await tracker.taskGraph(spec)
+      melde({ art: 'task-graph', tickets: graph })
+      halt()
+      const ticket = graph
+        .filter((t) => bearbeitbar(t, tracker.nutzer))
+        .sort((a, b) => a.nummer - b.nummer)[0]
+      if (!ticket) {
+        const abschluss = await schliesseAb(
+          eingabe,
+          graph.every((t) => !t.offen),
+          kommentiere,
+        )
+        await beende(abschluss)
+        return { ...ergebnis, abschluss }
       }
-    }
+      const nr = ticket.nummer
+      const ticketBranch = `ticket/${nr}`
 
-    /** Prüft einen Versuch; liefert bei Rot die rote Prüfung und die Rückmeldung für den nächsten Run. */
-    const pruefe = async (runErfolg: boolean, runAbgelaufen: boolean): Promise<Rot | undefined> => {
-      const pruefungen: [string, boolean][] = [
-        ['Run erfolgreich', runErfolg && !runAbgelaufen],
-        [`HEAD auf ${ticketBranch}`, aktuellerBranch(verzeichnis) === ticketBranch],
-        [
-          'neuer Commit seit Fixpunkt',
-          git(verzeichnis, 'rev-list', '--count', `${fixpunkt}..${ticketBranch}`) !== '0',
-        ],
-        ['Arbeitsverzeichnis sauber', git(verzeichnis, 'status', '--porcelain') === ''],
-      ]
-      for (const [name, ok] of pruefungen) melde({ art: 'pruefung', ticket: nr, name, ok })
-      const rot = pruefungen.find(([, ok]) => !ok)
-      if (rot) {
-        return {
-          pruefung: rot[0],
-          rueckmeldung: runAbgelaufen
-            ? `Der letzte Versuch war rot: Der Run wurde nach ${RUN_ZEITLIMIT / MINUTE} Minuten beendet.`
-            : `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
-        }
-      }
-      const signal = uhr.zeitlimit(CHECKS_ZEITLIMIT)
-      for (const check of eingabe.checks) {
-        const ausfuehrung = await eingabe.sandbox.fuehreAus(check, { verzeichnis, signal })
-        const { exitCode } = ausfuehrung
-        const ausgabe = filtere(ausfuehrung.ausgabe)
-        const pruefung = `Check: ${check}`
-        const ok = exitCode === 0 && !signal.aborted
-        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok, ausgabe })
-        if (!ok) {
-          const grund = signal.aborted
-            ? `wurde nach ${CHECKS_ZEITLIMIT / MINUTE} Minuten beendet (Zeitlimit für alle Checks)`
-            : `endete mit Exit ${exitCode}`
+      await tracker.beanspruche(nr)
+      genommen = nr
+      melde({ art: 'ticket-genommen', ticket: nr })
+      git(verzeichnis, 'checkout', '-q', '-B', ticketBranch, integration)
+      const fixpunkt = git(verzeichnis, 'rev-parse', 'HEAD')
+
+      /** Prüft einen Versuch; liefert bei Rot die rote Prüfung und die Rückmeldung für den nächsten Run. */
+      const pruefe = async (
+        runErfolg: boolean,
+        runAbgelaufen: boolean,
+      ): Promise<Rot | undefined> => {
+        const pruefungen: [string, boolean][] = [
+          ['Run erfolgreich', runErfolg && !runAbgelaufen],
+          [`HEAD auf ${ticketBranch}`, aktuellerBranch(verzeichnis) === ticketBranch],
+          [
+            'neuer Commit seit Fixpunkt',
+            git(verzeichnis, 'rev-list', '--count', `${fixpunkt}..${ticketBranch}`) !== '0',
+          ],
+          ['Arbeitsverzeichnis sauber', git(verzeichnis, 'status', '--porcelain') === ''],
+        ]
+        for (const [name, ok] of pruefungen) melde({ art: 'pruefung', ticket: nr, name, ok })
+        const rot = pruefungen.find(([, ok]) => !ok)
+        if (rot) {
           return {
-            pruefung,
-            rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` ${grund}.\n\n${kuerzeVonVorn(ausgabe)}`,
-            ausgabe,
+            pruefung: rot[0],
+            rueckmeldung: runAbgelaufen
+              ? `Der letzte Versuch war rot: Der Run wurde nach ${RUN_ZEITLIMIT / MINUTE} Minuten beendet.`
+              : `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
           }
         }
+        const zeitlimit = uhr.zeitlimit(CHECKS_ZEITLIMIT)
+        const signal = AbortSignal.any([zeitlimit, abbruch])
+        for (const check of eingabe.checks) {
+          const ausfuehrung = await eingabe.sandbox.fuehreAus(check, { verzeichnis, signal })
+          halt()
+          const { exitCode } = ausfuehrung
+          const ausgabe = filtere(ausfuehrung.ausgabe)
+          const pruefung = `Check: ${check}`
+          const ok = exitCode === 0 && !zeitlimit.aborted
+          melde({ art: 'pruefung', ticket: nr, name: pruefung, ok, ausgabe })
+          if (!ok) {
+            const grund = zeitlimit.aborted
+              ? `wurde nach ${CHECKS_ZEITLIMIT / MINUTE} Minuten beendet (Zeitlimit für alle Checks)`
+              : `endete mit Exit ${exitCode}`
+            return {
+              pruefung,
+              rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` ${grund}.\n\n${kuerzeVonVorn(ausgabe)}`,
+              ausgabe,
+            }
+          }
+        }
+        return undefined
       }
-      return undefined
-    }
 
-    let rot: Rot | undefined
-    let versuch = 0
-    let runs = 0
-    const blocks: Block[] = []
-    /** Die rote Prüfung jedes Versuchs. */
-    const rote: string[] = []
-    let sessionId: string | undefined
-    while (versuch < versuche) {
-      versuch++
-      melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
-      let run: RunErgebnis
-      let signal: AbortSignal
-      while (true) {
-        // Jeder Neustart nach dem Usage-Limit ist ein eigener Run mit eigener Nummer.
-        const r = ++runs
-        signal = uhr.zeitlimit(RUN_ZEITLIMIT)
-        run = await eingabe.agent.run({
-          ticket,
-          verzeichnis,
-          fixpunkt,
-          rueckmeldung: rot?.rueckmeldung,
-          signal,
-          ausgabe: (zeile) =>
-            melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
+      let rot: Rot | undefined
+      let versuch = 0
+      let runs = 0
+      const blocks: Block[] = []
+      /** Die rote Prüfung jedes Versuchs. */
+      const rote: string[] = []
+      let sessionId: string | undefined
+      while (versuch < versuche) {
+        versuch++
+        melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
+        let run: RunErgebnis
+        let signal: AbortSignal
+        while (true) {
+          // Jeder Neustart nach dem Usage-Limit ist ein eigener Run mit eigener Nummer.
+          halt()
+          const r = ++runs
+          signal = uhr.zeitlimit(RUN_ZEITLIMIT)
+          run = await eingabe.agent.run({
+            ticket,
+            verzeichnis,
+            fixpunkt,
+            rueckmeldung: rot?.rueckmeldung,
+            signal: AbortSignal.any([signal, abbruch]),
+            ausgabe: (zeile) =>
+              melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
+          })
+          melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
+          blocks.push(...(run.blocks ?? []))
+          sessionId = run.sessionId
+          halt()
+          if (run.usageLimit === undefined) break
+          // Usage-Limit: kein Versuch verbraucht; derselbe Versuch startet nach dem Reset neu.
+          if (run.usageLimit === 'guthaben') {
+            // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
+            const abschluss: AbschlussErgebnis = { art: 'entfaellt', grund: 'Tickets offen' }
+            melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
+            await beende(abschluss)
+            return { ...ergebnis, abschluss, angehalten: 'guthaben' }
+          }
+          let reset: number | undefined = run.usageLimit
+          while (reset !== undefined) {
+            melde({ art: 'pause', ticket: nr, reset })
+            await uhr.warte(Math.max(0, reset - uhr.jetzt()) + RESET_PUFFER, abbruch)
+            halt()
+            reset = await eingabe.agent.erschoepftBis()
+          }
+        }
+        rot = await pruefe(run.erfolg, signal.aborted)
+        if (!rot) break
+        rote.push(rot.pruefung)
+        // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
+        await tracker.oeffneWieder(nr)
+        if (aktuellerBranch(verzeichnis) !== ticketBranch) {
+          git(verzeichnis, 'checkout', '-q', '-f', ticketBranch)
+        }
+      }
+
+      if (rot) {
+        git(verzeichnis, 'reset', '-q', '--hard')
+        git(verzeichnis, 'clean', '-q', '-fd')
+        git(verzeichnis, 'checkout', '-q', '-f', integration)
+        loescheTicketBranch(verzeichnis, ticketBranch)
+        await tracker.markiereGescheitert(nr)
+        await tracker.gibFrei(nr)
+        await kommentiere(
+          nr,
+          kommentarGescheitert({
+            rote,
+            versuche,
+            ausgabe:
+              rot.ausgabe === undefined
+                ? undefined
+                : kuerzeVonVorn(rot.ausgabe, 'gekürzt, vollständig im Protokoll'),
+            blocks: blocks.length,
+            sessionId,
+            protokoll: eingabe.protokoll,
+          }),
+        )
+        melde({ art: 'ticket-gescheitert', ticket: nr, versuche: versuch, pruefung: rot.pruefung })
+        genommen = undefined
+        ergebnis.tickets.push({
+          nummer: nr,
+          ergebnis: 'gescheitert',
+          versuche: versuch,
+          pruefung: rot.pruefung,
         })
-        melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
-        blocks.push(...(run.blocks ?? []))
-        sessionId = run.sessionId
-        if (run.usageLimit === undefined) break
-        // Usage-Limit: kein Versuch verbraucht; derselbe Versuch startet nach dem Reset neu.
-        if (run.usageLimit === 'guthaben') {
-          // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
-          const abschluss: AbschlussErgebnis = { art: 'entfaellt', grund: 'Tickets offen' }
-          melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
-          await beende(abschluss)
-          return { ...ergebnis, abschluss, angehalten: 'guthaben' }
-        }
-        let reset: number | undefined = run.usageLimit
-        while (reset !== undefined) {
-          melde({ art: 'pause', ticket: nr, reset })
-          await uhr.warte(Math.max(0, reset - uhr.jetzt()) + RESET_PUFFER)
-          reset = await eingabe.agent.erschoepftBis()
-        }
+        continue
       }
-      rot = await pruefe(run.erfolg, signal.aborted)
-      if (!rot) break
-      rote.push(rot.pruefung)
-      // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
-      await tracker.oeffneWieder(nr)
-      if (aktuellerBranch(verzeichnis) !== ticketBranch) {
-        git(verzeichnis, 'checkout', '-q', '-f', ticketBranch)
-      }
-    }
 
-    if (rot) {
-      git(verzeichnis, 'reset', '-q', '--hard')
-      git(verzeichnis, 'clean', '-q', '-fd')
-      git(verzeichnis, 'checkout', '-q', '-f', integration)
-      loescheTicketBranch()
-      await tracker.markiereGescheitert(nr)
-      await tracker.gibFrei(nr)
+      if (git(verzeichnis, 'rev-list', '--count', `${fixpunkt}..HEAD`) !== '1') {
+        // Ausnahmefall: zu einem Commit zusammenfassen, die Messages wörtlich hintereinander.
+        const messages = git(
+          verzeichnis,
+          'log',
+          '-z',
+          '--reverse',
+          '--format=%B',
+          `${fixpunkt}..HEAD`,
+        )
+          .split('\0')
+          .map((m) => m.trim())
+          .filter(Boolean)
+        git(verzeichnis, 'reset', '-q', '--soft', fixpunkt)
+        git(verzeichnis, 'commit', '-q', '-m', messages.join('\n\n'))
+      }
+      git(verzeichnis, 'checkout', '-q', integration)
+      git(verzeichnis, 'merge', '-q', '--ff-only', ticketBranch)
+      git(verzeichnis, 'push', '-q', 'origin', integration)
+      const commit = git(verzeichnis, 'rev-parse', 'HEAD')
+      melde({ art: 'push', branch: integration, commit })
+      loescheTicketBranch(verzeichnis, ticketBranch)
       await kommentiere(
         nr,
-        kommentarGescheitert({
-          rote,
-          versuche,
-          ausgabe:
-            rot.ausgabe === undefined
-              ? undefined
-              : kuerzeVonVorn(rot.ausgabe, 'gekürzt, vollständig im Protokoll'),
-          blocks: blocks.length,
-          sessionId,
-          protokoll: eingabe.protokoll,
-        }),
+        `Erledigt: ${commit} in ${integration}, Versuch ${versuch} von ${versuche}, Blocks: ${blocks.length}`,
       )
-      melde({ art: 'ticket-gescheitert', ticket: nr, versuche: versuch, pruefung: rot.pruefung })
-      ergebnis.tickets.push({
-        nummer: nr,
-        ergebnis: 'gescheitert',
-        versuche: versuch,
-        pruefung: rot.pruefung,
-      })
-      continue
+      await tracker.schliesse(nr)
+      melde({ art: 'ticket-erledigt', ticket: nr, commit, versuche: versuch })
+      genommen = undefined
+      ergebnis.tickets.push({ nummer: nr, ergebnis: 'erledigt', versuche: versuch, commit })
     }
+  } catch (fehler) {
+    if (!(fehler instanceof Abgebrochen)) throw fehler
+  }
 
-    if (git(verzeichnis, 'rev-list', '--count', `${fixpunkt}..HEAD`) !== '1') {
-      // Ausnahmefall: zu einem Commit zusammenfassen, die Messages wörtlich hintereinander.
-      const messages = git(
-        verzeichnis,
-        'log',
-        '-z',
-        '--reverse',
-        '--format=%B',
-        `${fixpunkt}..HEAD`,
-      )
-        .split('\0')
-        .map((m) => m.trim())
-        .filter(Boolean)
-      git(verzeichnis, 'reset', '-q', '--soft', fixpunkt)
-      git(verzeichnis, 'commit', '-q', '-m', messages.join('\n\n'))
-    }
-    git(verzeichnis, 'checkout', '-q', integration)
-    git(verzeichnis, 'merge', '-q', '--ff-only', ticketBranch)
-    git(verzeichnis, 'push', '-q', 'origin', integration)
-    const commit = git(verzeichnis, 'rev-parse', 'HEAD')
-    melde({ art: 'push', branch: integration, commit })
-    loescheTicketBranch()
-    await kommentiere(
-      nr,
-      `Erledigt: ${commit} in ${integration}, Versuch ${versuch} von ${versuche}, Blocks: ${blocks.length}`,
-    )
-    await tracker.schliesse(nr)
-    melde({ art: 'ticket-erledigt', ticket: nr, commit, versuche: versuch })
-    ergebnis.tickets.push({ nummer: nr, ergebnis: 'erledigt', versuche: versuch, commit })
+  // Geordneter Abbruch: Arbeitsstand verwerfen, Ticket freigeben, kein Kommentar an der Spec.
+  if (genommen !== undefined) {
+    git(verzeichnis, 'reset', '-q', '--hard')
+    git(verzeichnis, 'clean', '-q', '-fd')
+  }
+  git(verzeichnis, 'checkout', '-q', '-f', startpunkt)
+  if (genommen !== undefined) {
+    loescheTicketBranch(verzeichnis, `ticket/${genommen}`)
+    await tracker.gibFrei(genommen)
+  }
+  const abschluss: AbschlussErgebnis = { art: 'entfaellt', grund: 'abgebrochen' }
+  const ende = { art: 'lauf-beendet', abschluss, zeit: uhr.jetzt() } as const
+  eingabe.melde?.({ ...ende, uebersicht: uebersicht([...verlauf, { ...ende, uebersicht: '' }]) })
+  return { ...ergebnis, abschluss, angehalten: 'abgebrochen' }
+}
+
+/** Löscht den Ticket-Branch lokal und auf dem Remote, soweit es ihn gibt. */
+function loescheTicketBranch(verzeichnis: string, branch: string) {
+  if (branchExistiert(verzeichnis, branch)) git(verzeichnis, 'branch', '-q', '-D', branch)
+  if (git(verzeichnis, 'ls-remote', '--heads', 'origin', branch)) {
+    git(verzeichnis, 'push', '-q', 'origin', '--delete', branch)
   }
 }
 

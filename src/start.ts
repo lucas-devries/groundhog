@@ -118,23 +118,40 @@ export async function starte({
     freigeben = sperre.freigeben
 
     if (git(verzeichnis, 'status', '--porcelain') !== '') {
-      throw new Abbruch(
-        'Das Arbeitsverzeichnis ist nicht sauber. Committe oder verwirf die Änderungen.',
-      )
+      // Ausnahme: der Rest eines abgebrochenen Laufs auf ticket/<n>.
+      const rest = git(verzeichnis, 'branch', '--show-current').match(/^ticket\/(\d+)$/)?.[1]
+      const verwerfen =
+        rest !== undefined &&
+        istTerminal &&
+        (await dialog.confirm({
+          message: `Rest von Ticket ${rest} verwerfen?`,
+          initialValue: false,
+          active: 'Ja',
+          inactive: 'Nein',
+        }))
+      if (typeof verwerfen === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
+      if (!verwerfen) {
+        throw new Abbruch(
+          'Das Arbeitsverzeichnis ist nicht sauber. Committe oder verwirf die Änderungen.',
+        )
+      }
+      git(verzeichnis, 'reset', '-q', '--hard')
+      git(verzeichnis, 'clean', '-q', '-fd')
     }
     git(verzeichnis, 'fetch', '-q', '--prune', 'origin')
+    // Genau die Namen spec und ticket; spec/<n> und ticket/<n> früherer Läufe sind kein Hindernis.
     const stoerend = git(
       verzeichnis,
       'for-each-ref',
       '--format=%(refname:short)',
-      'refs/heads/spec',
-      'refs/heads/ticket',
-      'refs/remotes/origin/spec',
-      'refs/remotes/origin/ticket',
+      'refs/heads/',
+      'refs/remotes/origin/',
     )
-    if (stoerend) {
+      .split('\n')
+      .filter((b) => /^(origin\/)?(spec|ticket)$/.test(b))
+    if (stoerend.length > 0) {
       throw new Abbruch(
-        `Es gibt einen Branch ${stoerend.split('\n').join(', ')}. Er stört spec/* und ticket/*; benenne ihn um.`,
+        `Es gibt einen Branch ${stoerend.join(', ')}. Er stört spec/* und ticket/*; benenne ihn um.`,
       )
     }
     const fehlend = konfiguration.zielBranches.filter(

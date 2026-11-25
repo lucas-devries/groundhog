@@ -228,6 +228,11 @@ test.each([
     'Abschluss PR: https://github.com/o/r/pull/9',
   ],
   ['nichts', { art: 'nichts' }, 'Abschluss Nichts: spec/25 bleibt stehen'],
+  [
+    'pr',
+    { art: 'entfaellt', grund: 'abgebrochen' },
+    'Abschluss PR entfällt, weil der Lauf abgebrochen wurde. Nächster Lauf: groundhog 25',
+  ],
 ] as const)('Abschluss %s → %o', (wahl, abschluss, zeile) => {
   expect(
     text([begonnen(wahl), beendet(abschluss)])

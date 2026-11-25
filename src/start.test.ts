@@ -322,6 +322,65 @@ test('ohne neuere Version fragt das Menü nicht nach dem Update', async () => {
   expect(gezeigt[0]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
 })
 
+/** Rest eines abgebrochenen Laufs: `HEAD` auf ticket/7, auf Wunsch mit schmutzigem Arbeitsverzeichnis. */
+function ticketRest(klon: string, schmutzig: boolean) {
+  git(klon, 'checkout', '-q', '-b', 'ticket/7')
+  commitDatei(klon, 'halb.txt', 'x', 'halb fertig')
+  if (schmutzig) {
+    writeFileSync(join(klon, 'halb.txt'), 'y')
+    writeFileSync(join(klon, 'neu.txt'), 'x')
+  }
+}
+
+test('schmutziger ticket/*-Rest: Ja zu „Rest von Ticket n verwerfen?“ räumt auf, dann folgt das Menü', async () => {
+  const { klon, pfad } = bereit()
+  ticketRest(klon, true)
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true, 'main', 'pr'])
+
+  expect(ergebnis.ok).toBe(true)
+  expect(gezeigt[0]).toEqual({
+    art: 'confirm',
+    message: 'Rest von Ticket 7 verwerfen?',
+    initialValue: false,
+    active: 'Ja',
+    inactive: 'Nein',
+  })
+  expect(gezeigt[1]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
+  expect(git(klon, 'status', '--porcelain')).toBe('')
+})
+
+test('schmutziger ticket/*-Rest: Nein bricht ab, ohne etwas zu verändern', async () => {
+  const { klon, pfad } = bereit()
+  ticketRest(klon, true)
+  const status = git(klon, 'status', '--porcelain')
+
+  const { ergebnis } = await start({ klon, pfad }, [false])
+
+  expect(ergebnis).toMatchObject({ ok: false, exitCode: 1 })
+  expect(git(klon, 'status', '--porcelain')).toBe(status)
+  expect(existsSync(sperre(klon))).toBe(false)
+})
+
+test('sauberer ticket/*-Rest: der Lauf startet ohne Frage', async () => {
+  const { klon, pfad } = bereit()
+  ticketRest(klon, false)
+
+  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['main', 'pr'])
+
+  expect(ergebnis.ok).toBe(true)
+  expect(gezeigt[0]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
+})
+
+test('Integration- und Ticket-Branches eines früheren Laufs auf dem Remote stören den Start nicht', async () => {
+  const { klon, pfad } = bereit()
+  git(klon, 'push', '-q', 'origin', 'main:spec/25', 'main:ticket/7')
+
+  const { ergebnis } = await start({ klon, pfad }, ['main', 'pr'])
+
+  expect(ergebnis.ok).toBe(true)
+})
+
 const ohneSubIssues: GhAntwort = {
   ausgabe: JSON.stringify({
     data: {

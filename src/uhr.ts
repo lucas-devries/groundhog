@@ -4,15 +4,15 @@ import { setTimeout as schlafe } from 'node:timers/promises'
 export interface Uhr {
   /** Millisekunden seit der Epoche. */
   jetzt(): number
-  /** Wartet `ms` Millisekunden. */
-  warte(ms: number): Promise<void>
+  /** Wartet `ms` Millisekunden; ein Abbruch über `signal` beendet das Warten vorzeitig. */
+  warte(ms: number, signal?: AbortSignal): Promise<void>
   /** Ein Signal, das nach `ms` Millisekunden abbricht. */
   zeitlimit(ms: number): AbortSignal
 }
 
 export const systemUhr: Uhr = {
   jetzt: () => Date.now(),
-  warte: (ms) => schlafe(ms),
+  warte: (ms, signal) => schlafe(ms, undefined, { signal }).catch(() => {}),
   zeitlimit: (ms) => {
     const ac = new AbortController()
     // unref: Ein längst beendeter Run hält den Prozess nicht bis zum Zeitlimit am Leben.
