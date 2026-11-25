@@ -5,87 +5,84 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime'
 
-export interface Ausfuehrung {
+export interface Execution {
   exitCode: number
-  /** stdout und stderr, in der Reihenfolge, in der sie kamen. */
-  ausgabe: string
+  /** stdout and stderr, in the order they came. */
+  output: string
 }
 
-/** Die Sandbox: führt einen Befehl aus. Dahinter: `srt`-Adapter (#34), Durchreiche. */
+/** The sandbox: executes a command. Behind it: `srt` adapter (#34), passthrough. */
 export interface Sandbox {
-  /** Bricht `signal` ab, beendet die Sandbox den Befehl samt Kindprozessen. */
-  fuehreAus(
-    befehl: string,
-    optionen: { verzeichnis: string; signal: AbortSignal },
-  ): Promise<Ausfuehrung>
+  /** If `signal` aborts, the sandbox ends the command including its child processes. */
+  execute(command: string, options: { directory: string; signal: AbortSignal }): Promise<Execution>
 }
 
-/** Durchreiche ohne Grenzen: führt den Befehl direkt in der Shell aus. */
-export const durchreiche: Sandbox = {
-  fuehreAus: (befehl, optionen) => fuehre([befehl], optionen, true),
+/** Passthrough without boundaries: executes the command directly in the shell. */
+export const passthrough: Sandbox = {
+  execute: (command, options) => run([command], options, true),
 }
 
-/** Die `srt`-Sandbox; `umhuelle` gibt dem Claude-Adapter den Aufruf, der `claude` darin startet. */
+/** The `srt` sandbox; `wrap` gives the Claude adapter the call that starts `claude` inside it. */
 export interface SrtSandbox extends Sandbox {
-  umhuelle(befehl: string[], verzeichnis: string): string[]
+  wrap(command: string[], directory: string): string[]
 }
 
 const SRT_CLI = createRequire(import.meta.url).resolve('@anthropic-ai/sandbox-runtime/dist/cli.js')
 
-/** Die Sandbox mit `srt`: feste Host-Liste plus `hosts`, Dateisystem nach `srtKonfiguration`. */
+/** The sandbox with `srt`: fixed host list plus `hosts`, file system as in `srtConfig`. */
 export function srtSandbox(hosts: string[]): SrtSandbox {
-  // ponytail: der Ordner bleibt nach dem Lauf in Temp liegen (eine kleine Datei).
-  const geschuetzt = mkdtempSync(join(tmpdir(), 'groundhog-srt-'))
-  const aufruf = (verzeichnis: string, rest: string[]) => {
-    const datei = join(geschuetzt, 'settings.json')
-    const orte = { verzeichnis, hosts, home: homedir(), temp: tmpdir(), geschuetzt }
-    writeFileSync(datei, JSON.stringify(srtKonfiguration(orte)))
-    return [process.execPath, SRT_CLI, '--settings', datei, ...rest]
+  // ponytail: the folder stays in temp after the run (one small file).
+  const settingsDir = mkdtempSync(join(tmpdir(), 'groundhog-srt-'))
+  const call = (directory: string, rest: string[]) => {
+    const file = join(settingsDir, 'settings.json')
+    const paths = { directory, hosts, home: homedir(), temp: tmpdir(), settingsDir }
+    writeFileSync(file, JSON.stringify(srtConfig(paths)))
+    return [process.execPath, SRT_CLI, '--settings', file, ...rest]
   }
   return {
-    umhuelle: (befehl, verzeichnis) => aufruf(verzeichnis, ['--', ...befehl]),
-    fuehreAus: (befehl, optionen) => fuehre(aufruf(optionen.verzeichnis, ['-c', befehl]), optionen),
+    wrap: (command, directory) => call(directory, ['--', ...command]),
+    execute: (command, options) => run(call(options.directory, ['-c', command]), options),
   }
 }
 
-/** Startet `argv` und sammelt die Ausgabe. Bricht `signal` ab, stirbt die ganze Prozessgruppe. */
-function fuehre(
-  [datei = '', ...args]: string[],
-  { verzeichnis, signal }: { verzeichnis: string; signal: AbortSignal },
+/** Starts `argv` and collects the output. If `signal` aborts, the whole process group dies. */
+function run(
+  [file = '', ...args]: string[],
+  { directory, signal }: { directory: string; signal: AbortSignal },
   shell = false,
-): Promise<Ausfuehrung> {
+): Promise<Execution> {
   return new Promise((resolve, reject) => {
-    const kind = spawn(datei, args, {
-      cwd: verzeichnis,
+    const child = spawn(file, args, {
+      cwd: directory,
       shell,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Eigene Prozessgruppe, damit ein Abbruch auch die Kindprozesse der Shell trifft.
+      // Own process group, so that an abort also hits the shell's child processes.
       detached: true,
     })
-    const beende = () => {
+    const kill = () => {
       try {
-        if (kind.pid !== undefined) process.kill(-kind.pid, 'SIGKILL')
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
       } catch {
-        // Die Gruppe ist schon weg.
+        // The group is already gone.
       }
     }
-    if (signal.aborted) beende()
-    signal.addEventListener('abort', beende, { once: true })
-    kind.on('close', () => signal.removeEventListener('abort', beende))
-    let ausgabe = ''
-    kind.stdout.on('data', (d) => {
-      ausgabe += d
+    if (signal.aborted) kill()
+    signal.addEventListener('abort', kill, { once: true })
+    child.on('close', () => signal.removeEventListener('abort', kill))
+    let output = ''
+    child.stdout.on('data', (d) => {
+      output += d
     })
-    kind.stderr.on('data', (d) => {
-      ausgabe += d
+    child.stderr.on('data', (d) => {
+      output += d
     })
-    kind.on('error', reject)
-    kind.on('close', (code) => resolve({ exitCode: code ?? 1, ausgabe }))
+    child.on('error', reject)
+    child.on('close', (code) => resolve({ exitCode: code ?? 1, output }))
   })
 }
 
-/** Die feste Host-Liste, die jede Sandbox erreicht; `sandbox.hosts` kommt dazu. */
-export const FESTE_HOSTS = [
+/** The fixed host list every sandbox reaches; `sandbox.hosts` comes on top. */
+export const FIXED_HOSTS = [
   'api.anthropic.com',
   'claude.ai',
   'platform.claude.com',
@@ -94,52 +91,52 @@ export const FESTE_HOSTS = [
   'github.com',
 ]
 
-/** Die Orte, aus denen die `srt`-Config entsteht. */
-export interface SrtOrte {
-  verzeichnis: string
+/** The paths the `srt` config is built from. */
+export interface SrtPaths {
+  directory: string
   hosts: string[]
   home: string
   temp: string
-  /** Ordner der Config-Dateien; unbeschreibbar, damit ein Run die Grenzen des nächsten nicht ändert. */
-  geschuetzt: string
+  /** Folder of the config files; not writable, so that a session can't change the next one's boundaries. */
+  settingsDir: string
 }
 
-/** Die `srt`-Config eines Runs oder Checks. */
-export function srtKonfiguration({ verzeichnis, hosts, home, temp, geschuetzt }: SrtOrte) {
+/** The `srt` config of a session or check. */
+export function srtConfig({ directory, hosts, home, temp, settingsDir }: SrtPaths) {
   return {
-    network: { allowedDomains: [...FESTE_HOSTS, ...hosts], deniedDomains: [] },
+    network: { allowedDomains: [...FIXED_HOSTS, ...hosts], deniedDomains: [] },
     filesystem: {
       denyRead: [join(home, '.ssh'), join(home, '.config/gh'), join(home, '.npmrc')],
       allowWrite: [
-        verzeichnis,
+        directory,
         join(home, '.claude'),
         join(home, '.claude.json'),
-        // ponytail: npm-Standard-Cache; ein per `npm_config_cache` verlegter Cache bleibt gesperrt.
+        // ponytail: npm's default cache; a cache moved via `npm_config_cache` stays locked.
         join(home, '.npm'),
         temp,
       ],
       denyWrite: [
         join(home, '.claude/settings.json'),
-        join(verzeichnis, '.git/hooks'),
-        join(verzeichnis, '.git/config'),
-        geschuetzt,
+        join(directory, '.git/hooks'),
+        join(directory, '.git/config'),
+        settingsDir,
       ],
     },
   }
 }
 
 /**
- * Was fehlt, damit die Sandbox startet; leer heißt startbar. Prüft die Werkzeuge von `srt` (auf
- * Linux `bubblewrap`, `socat`, `ripgrep`) und den Start als root, bei dem `claude` Bypass verweigert.
+ * What is missing for the sandbox to start; empty means it can start. Checks the tools of `srt`
+ * (on Linux `bubblewrap`, `socat`, `ripgrep`) and starting as root, where `claude` refuses bypass.
  */
-export function sandboxFehlt({
-  abhaengigkeiten = () => SandboxManager.checkDependencies().errors,
+export function sandboxMissing({
+  dependencies = () => SandboxManager.checkDependencies().errors,
   uid = process.getuid?.(),
 }: {
-  abhaengigkeiten?: () => string[]
+  dependencies?: () => string[]
   uid?: number
 } = {}): string[] {
-  const fehlt = abhaengigkeiten()
-  if (uid === 0) fehlt.push('Start als root: claude startet als root nicht mit Bypass')
-  return fehlt
+  const missing = dependencies()
+  if (uid === 0) missing.push('Started as root: claude does not start with bypass as root')
+  return missing
 }

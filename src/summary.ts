@@ -1,203 +1,203 @@
 import { hostname } from 'node:os'
 import type { Block } from './agent.ts'
-import { ABSCHLUSS, type Ereignis, integrationBranch } from './engine.ts'
+import { type Event, FINISH, integrationBranch } from './engine.ts'
 import type { Ticket } from './tracker.ts'
 
-/** Die Übersicht eines Laufs als Markdown, allein aus den Ereignissen der Engine. */
-export function uebersicht(ereignisse: Ereignis[]): string {
-  const tickets = new Map<number, TicketVerlauf>()
+/** The summary of a run as Markdown, from the engine's events alone. */
+export function summary(events: Event[]): string {
+  const tickets = new Map<number, TicketHistory>()
   let graph: Ticket[] = []
-  let begonnen: Extract<Ereignis, { art: 'lauf-begonnen' }> | undefined
-  let beendet: Extract<Ereignis, { art: 'lauf-beendet' }> | undefined
-  const verlauf = (nr: number) => {
+  let started: Extract<Event, { type: 'run-started' }> | undefined
+  let finished: Extract<Event, { type: 'run-finished' }> | undefined
+  const history = (nr: number) => {
     const t = tickets.get(nr) ?? {
-      ergebnis: 'unterbrochen',
-      beginn: 0,
-      versuch: 0,
-      von: 0,
-      pausen: 0,
-      pausiert: false,
+      result: 'interrupted',
+      start: 0,
+      attempt: 0,
+      of: 0,
+      pauses: 0,
+      paused: false,
       blocks: [],
     }
     tickets.set(nr, t)
     return t
   }
 
-  for (const e of ereignisse) {
-    switch (e.art) {
-      case 'lauf-begonnen':
-        begonnen = e
+  for (const e of events) {
+    switch (e.type) {
+      case 'run-started':
+        started = e
         break
-      case 'lauf-beendet':
-        beendet = e
+      case 'run-finished':
+        finished = e
         break
       case 'task-graph':
         graph = e.tickets
         break
-      case 'ticket-genommen':
-        verlauf(e.ticket).beginn = e.zeit
+      case 'ticket-taken':
+        history(e.ticket).start = e.time
         break
-      case 'versuch-begonnen':
-        Object.assign(verlauf(e.ticket), { versuch: e.versuch, von: e.von })
+      case 'attempt-started':
+        Object.assign(history(e.ticket), { attempt: e.attempt, of: e.of })
         break
-      case 'run-beendet': {
-        const t = verlauf(e.ticket)
+      case 'session-finished': {
+        const t = history(e.ticket)
         t.blocks.push(...(e.blocks ?? []))
         t.sessionId = e.sessionId
-        t.pausiert = false
+        t.paused = false
         break
       }
       case 'pause': {
-        // Nach dem Reset wartet die Engine womöglich weiter; das bleibt dieselbe Pause.
-        const t = verlauf(e.ticket)
-        if (!t.pausiert) t.pausen++
-        t.pausiert = true
+        // After the reset the engine may keep waiting; that stays the same pause.
+        const t = history(e.ticket)
+        if (!t.paused) t.pauses++
+        t.paused = true
         break
       }
-      case 'ticket-erledigt':
-        Object.assign(verlauf(e.ticket), {
-          ergebnis: 'erledigt',
-          ende: e.zeit,
-          zusatz: `Commit ${e.commit}`,
+      case 'ticket-done':
+        Object.assign(history(e.ticket), {
+          result: 'done',
+          end: e.time,
+          extra: `Commit ${e.commit}`,
         })
         break
-      case 'ticket-gescheitert': {
-        const t = verlauf(e.ticket)
+      case 'ticket-failed': {
+        const t = history(e.ticket)
         const resume = t.sessionId ? ` · \`claude --resume ${t.sessionId}\`` : ''
         Object.assign(t, {
-          ergebnis: 'gescheitert',
-          ende: e.zeit,
-          zusatz: `rot: ${e.pruefung}${resume}`,
+          result: 'failed',
+          end: e.time,
+          extra: `red: ${e.verification}${resume}`,
         })
         break
       }
     }
   }
 
-  const kopf: string[] = []
-  if (begonnen) {
-    kopf.push(`# Übersicht Spec #${begonnen.spec}`, '', `- Beginn: ${zeitpunkt(begonnen.zeit)}`)
+  const head: string[] = []
+  if (started) {
+    head.push(`# Summary of spec #${started.spec}`, '', `- Start: ${pointInTime(started.time)}`)
   }
-  if (begonnen && beendet) {
-    const a = beendet.abschluss
-    const integration = `Integration-Branch ${integrationBranch(begonnen.spec)}`
-    const was =
-      a.art === 'gemergt'
-        ? `gemergt, Merge-Commit ${a.commit}`
-        : a.art === 'konflikt'
-          ? `Konflikt, ${integration} bleibt stehen`
-          : a.art === 'pr'
-            ? a.url
-            : a.art === 'nichts'
+  if (started && finished) {
+    const f = finished.finish
+    const integration = `Integration branch ${integrationBranch(started.spec)}`
+    const what =
+      f.type === 'merged'
+        ? `merged, merge commit ${f.commit}`
+        : f.type === 'conflict'
+          ? `conflict, ${integration} stays`
+          : f.type === 'pr'
+            ? f.url
+            : f.type === 'none'
               ? integration
-              : `nichts, weil ${a.grund}`
-    kopf.push(
-      `- Ende: ${zeitpunkt(beendet.zeit)}`,
-      `- Dauer: ${dauer(beendet.zeit - begonnen.zeit)}`,
-      `- Ziel-Branch: ${begonnen.auswahl.zielBranch}`,
-      `- Abschluss: ${ABSCHLUSS[begonnen.auswahl.abschluss]} → ${was}`,
+              : `nothing, because ${f.reason}`
+    head.push(
+      `- End: ${pointInTime(finished.time)}`,
+      `- Duration: ${duration(finished.time - started.time)}`,
+      `- Target branch: ${started.choice.targetBranch}`,
+      `- Finish: ${FINISH[started.choice.finish]} → ${what}`,
     )
   }
-  if (begonnen) {
-    const versionen = Object.entries(begonnen.versionen).map(([name, v]) => `${name} ${v}`)
-    kopf.push(`- Versionen: ${versionen.join(', ') || '–'}`)
+  if (started) {
+    const versions = Object.entries(started.versions).map(([name, v]) => `${name} ${v}`)
+    head.push(`- Versions: ${versions.join(', ') || '–'}`)
   }
 
-  const nummern = [...new Set([...graph.map((t) => t.nummer), ...tickets.keys()])].sort(
+  const numbers = [...new Set([...graph.map((t) => t.number), ...tickets.keys()])].sort(
     (a, b) => a - b,
   )
-  const zeilen = nummern.map((nr) => {
+  const lines = numbers.map((nr) => {
     const t = tickets.get(nr)
     if (t) {
-      const ende = t.ende ?? beendet?.zeit ?? t.beginn
-      const zeile = [
-        `- #${nr} ${t.ergebnis}`,
-        `Versuche ${t.versuch} von ${t.von}`,
-        `Pausen ${t.pausen}`,
-        `Dauer ${dauer(ende - t.beginn)}`,
+      const end = t.end ?? finished?.time ?? t.start
+      const line = [
+        `- #${nr} ${t.result}`,
+        `Attempts ${t.attempt} of ${t.of}`,
+        `Pauses ${t.pauses}`,
+        `Duration ${duration(end - t.start)}`,
         `Blocks ${t.blocks.length}`,
-        ...(t.zusatz ? [t.zusatz] : []),
+        ...(t.extra ? [t.extra] : []),
       ].join(' · ')
-      return [zeile, ...t.blocks.map((b) => `  - ${b.tool}: \`${b.befehl}\``)].join('\n')
+      return [line, ...t.blocks.map((b) => `  - ${b.tool}: \`${b.command}\``)].join('\n')
     }
-    const g = graph.find((g) => g.nummer === nr)
-    const offeneBlocker = g?.blocker.filter((b) => b.offen) ?? []
-    if (g && !g.offen) return `- #${nr} nicht angefasst, schon geschlossen`
-    if (offeneBlocker.length > 0) {
-      return `- #${nr} blockiert von ${offeneBlocker.map((b) => `#${b.nummer}`).join(', ')}`
+    const g = graph.find((g) => g.number === nr)
+    const openBlockers = g?.blockers.filter((b) => b.open) ?? []
+    if (g && !g.open) return `- #${nr} not touched, already closed`
+    if (openBlockers.length > 0) {
+      return `- #${nr} blocked by ${openBlockers.map((b) => `#${b.number}`).join(', ')}`
     }
-    return `- #${nr} nicht angefasst`
+    return `- #${nr} not touched`
   })
 
-  return [...kopf, '', '## Tickets', '', ...zeilen].join('\n')
+  return [...head, '', '## Tickets', '', ...lines].join('\n')
 }
 
-interface TicketVerlauf {
-  /** Ohne Ende-Ereignis des Tickets ist der Lauf mittendrin zu Ende gegangen. */
-  ergebnis: 'erledigt' | 'gescheitert' | 'unterbrochen'
-  beginn: number
-  ende?: number
-  versuch: number
-  /** Höchstzahl der Versuche. */
-  von: number
-  pausen: number
-  pausiert: boolean
+interface TicketHistory {
+  /** Without an end event of the ticket, the run ended in the middle of it. */
+  result: 'done' | 'failed' | 'interrupted'
+  start: number
+  end?: number
+  attempt: number
+  /** Maximum number of attempts. */
+  of: number
+  pauses: number
+  paused: boolean
   blocks: Block[]
   sessionId?: string
-  /** Commit oder rote Prüfung. */
-  zusatz?: string
+  /** Commit or red verification. */
+  extra?: string
 }
 
-/** JJJJ-MM-TT HH:MM:SS in lokaler Zeit. */
-function zeitpunkt(ms: number): string {
+/** YYYY-MM-DD HH:MM:SS in local time. */
+function pointInTime(ms: number): string {
   return new Date(ms).toLocaleString('sv-SE')
 }
 
-function dauer(ms: number): string {
+function duration(ms: number): string {
   const s = Math.round(ms / 1000)
-  const teile = [
+  const parts = [
     [Math.floor(s / 3600), 'h'],
     [Math.floor((s % 3600) / 60), 'min'],
     [s % 60, 's'],
   ] as const
   return (
-    teile
+    parts
       .filter(([n]) => n > 0)
-      .map(([n, e]) => `${n} ${e}`)
+      .map(([n, u]) => `${n} ${u}`)
       .join(' ') || '0 s'
   )
 }
 
-/** Der eine Kommentar an einem endgültig gescheiterten Ticket. */
-export function kommentarGescheitert(t: {
-  /** Die rote Prüfung jedes Versuchs. */
-  rote: string[]
-  /** Höchstzahl der Versuche pro Ticket. */
-  maxVersuche: number
-  /** Check-Ausgabe des letzten Versuchs, schon gekürzt; fehlt, wenn kein Check rot war. */
-  ausgabe?: string
+/** The one comment on a ticket that failed for good. */
+export function failedComment(t: {
+  /** The red verification of each attempt. */
+  reds: string[]
+  /** Maximum number of attempts per ticket. */
+  maxAttempts: number
+  /** Check output of the last attempt, already truncated; missing if no check was red. */
+  output?: string
   blocks: number
   sessionId?: string
-  protokoll?: string
+  logDir?: string
 }): string {
-  const teile = [
-    'Endgültig gescheitert, jetzt `ready-for-human`.',
-    t.rote.map((p, i) => `- Versuch ${i + 1} von ${t.maxVersuche} rot: ${p}`).join('\n'),
+  const parts = [
+    'Failed for good, now `ready-for-human`.',
+    t.reds.map((v, i) => `- Attempt ${i + 1} of ${t.maxAttempts} red: ${v}`).join('\n'),
   ]
-  if (t.ausgabe !== undefined) {
-    const zaun = '`'.repeat(Math.max(3, ...(t.ausgabe.match(/`+/g) ?? []).map((z) => z.length + 1)))
-    teile.push('Check-Ausgabe des letzten Versuchs:', `${zaun}\n${t.ausgabe}\n${zaun}`)
+  if (t.output !== undefined) {
+    const fence = '`'.repeat(Math.max(3, ...(t.output.match(/`+/g) ?? []).map((f) => f.length + 1)))
+    parts.push('Check output of the last attempt:', `${fence}\n${t.output}\n${fence}`)
   }
-  teile.push(`Blocks: ${t.blocks}`, fundort(t.protokoll, t.sessionId))
-  return teile.join('\n\n')
+  parts.push(`Blocks: ${t.blocks}`, resumeInfo(t.logDir, t.sessionId))
+  return parts.join('\n\n')
 }
 
-/** Wo es weitergeht: Session, Rechner und Protokoll. Nur in Kommentaren und der Ausgabe. */
-export function fundort(protokoll?: string, sessionId?: string): string {
+/** Where to pick it up: session, machine and log. Only in comments and the output. */
+export function resumeInfo(logDir?: string, sessionId?: string): string {
   return [
     sessionId && `- Session: \`claude --resume ${sessionId}\``,
-    `- Rechner: ${hostname()}`,
-    protokoll && `- Protokoll: \`${protokoll}\``,
+    `- Machine: ${hostname()}`,
+    logDir && `- Log: \`${logDir}\``,
   ]
     .filter(Boolean)
     .join('\n')

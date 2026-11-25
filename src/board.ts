@@ -1,173 +1,173 @@
 import { stripVTControlCharacters } from 'node:util'
-import { anzeige, stil, uhrzeit } from './display.ts'
-import type { Ereignis, GraphTicket } from './engine.ts'
+import { display, style, timeOfDay } from './display.ts'
+import type { Event, GraphTicket } from './engine.ts'
 
-export interface TafelOptionen {
-  farbe?: boolean
-  /** Ordner des Protokolls, für den Schluss. */
-  protokoll?: string
+export interface BoardOptions {
+  color?: boolean
+  /** Folder of the log, for the closing lines. */
+  logDir?: string
 }
 
-/** Wie viele Zeilen der Mitschrift die Tafel höchstens behält; mehr passt in kein Fenster. */
-const MITSCHRIFT_MAX = 1000
+/** How many transcript lines the board keeps at most; more fit in no window. */
+const TRANSCRIPT_MAX = 1000
 
 /**
- * Die Tafel: ein fester Bildschirm aus Kopfzeile, Task-Graph, Warnungen, der Mitschrift des
- * laufenden Runs und einer Fußzeile. `melde` nimmt jedes Ereignis des Laufs in Reihenfolge und
- * liefert die Zeilen, die die fortlaufende Ausgabe dafür schreiben würde (für den Schluss).
+ * The board: a fixed screen of header, task-graph, warnings, the transcript of the current
+ * session and a footer. `report` takes every event of the run in order and returns the lines the
+ * continuous output would write for it (for the closing lines).
  */
-export function tafel(optionen: TafelOptionen = {}) {
-  const s = stil(optionen.farbe ?? false)
-  // Ungekürzt; gekürzt wird erst beim Zeichnen, auf die Breite, die das Fenster gerade hat.
-  const zeilen = anzeige({ ...optionen, breite: Number.POSITIVE_INFINITY })
-  let kopf = ''
+export function board(options: BoardOptions = {}) {
+  const s = style(options.color ?? false)
+  // Untruncated; truncation happens only when drawing, to the width the window has right now.
+  const lines = display({ ...options, width: Number.POSITIVE_INFINITY })
+  let header = ''
   let tickets: GraphTicket[] = []
-  /** Zustand der Tickets, die dieser Lauf angefasst hat; die übrigen zeigen den Tracker. */
-  const zustand = new Map<number, string>()
-  const warnungen: string[] = []
-  let mitschrift: string[] = []
-  let fuss = ''
-  let versuch = ''
-  let run: number | undefined
+  /** State of the tickets this run has touched; the others show the tracker. */
+  const state = new Map<number, string>()
+  const warnings: string[] = []
+  let transcript: string[] = []
+  let footer = ''
+  let attempt = ''
+  let session: number | undefined
 
-  const melde = (e: Ereignis): string[] => {
-    const neu = zeilen(e)
-    switch (e.art) {
-      case 'lauf-begonnen':
-        kopf = neu[0] ?? ''
+  const report = (e: Event): string[] => {
+    const added = lines(e)
+    switch (e.type) {
+      case 'run-started':
+        header = added[0] ?? ''
         break
       case 'task-graph':
         tickets = e.tickets
         break
-      case 'versuch-begonnen':
-        versuch = `Versuch ${e.versuch} von ${e.von}`
-        zustand.set(e.ticket, s.cyan(`▶ läuft · ${versuch}`))
-        fuss = `#${e.ticket} · ${versuch}`
-        mitschrift = []
+      case 'attempt-started':
+        attempt = `Attempt ${e.attempt} of ${e.of}`
+        state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
+        footer = `#${e.ticket} · ${attempt}`
+        transcript = []
         break
-      case 'run-ausgabe':
-        // Ein neuer Run, auch der Neustart nach einer Pause: nur seine Mitschrift zählt.
-        if (e.run !== run) {
-          run = e.run
-          mitschrift = []
-          zustand.set(e.ticket, s.cyan(`▶ läuft · ${versuch}`))
+      case 'session-output':
+        // A new session, also the restart after a pause: only its transcript counts.
+        if (e.session !== session) {
+          session = e.session
+          transcript = []
+          state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
         }
-        mitschrift.push(...neu)
-        if (mitschrift.length > 2 * MITSCHRIFT_MAX) mitschrift = mitschrift.slice(-MITSCHRIFT_MAX)
+        transcript.push(...added)
+        if (transcript.length > 2 * TRANSCRIPT_MAX) transcript = transcript.slice(-TRANSCRIPT_MAX)
         break
-      case 'pruefung':
-        if (!e.ok) zustand.set(e.ticket, s.gelb(`↻ ${versuch} gescheitert`))
-        mitschrift.push(...neu)
+      case 'verification':
+        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${attempt} failed`))
+        transcript.push(...added)
         break
       case 'pause':
-        zustand.set(e.ticket, s.gelb(`⏸ Pause am Usage-Limit bis ${uhrzeit(e.reset, e.zeit)}`))
-        mitschrift.push(...neu)
+        state.set(e.ticket, s.yellow(`⏸ Pause at usage limit until ${timeOfDay(e.reset, e.time)}`))
+        transcript.push(...added)
         break
-      case 'run-beendet':
-      case 'lauf-angehalten':
-        mitschrift.push(...neu)
+      case 'session-finished':
+      case 'run-halted':
+        transcript.push(...added)
         break
-      case 'ticket-erledigt':
-        zustand.set(e.ticket, s.gruen(`✔ erledigt in Versuch ${e.versuche}`))
+      case 'ticket-done':
+        state.set(e.ticket, s.green(`✔ done in attempt ${e.attempts}`))
         break
-      case 'ticket-gescheitert':
-        zustand.set(e.ticket, s.rot(`✘ ready-for-human · ${e.pruefung}`))
+      case 'ticket-failed':
+        state.set(e.ticket, s.red(`✘ ready-for-human · ${e.verification}`))
         break
-      case 'warnung':
-        warnungen.push(...neu)
+      case 'warning':
+        warnings.push(...added)
         break
     }
-    return neu
+    return added
   }
 
-  /** Genau `hoehe` Zeilen, keine breiter als `breite`. */
-  const bildschirm = (breite: number, hoehe: number): string[] => {
-    const strich = s.matt('─'.repeat(breite))
-    const oben = [
-      kopf,
+  /** Exactly `height` lines, none wider than `width`. */
+  const screen = (width: number, height: number): string[] => {
+    const rule = s.dim('─'.repeat(width))
+    const top = [
+      header,
       '',
-      ...tickets.map((t) => `  #${t.nummer} ${zustand.get(t.nummer) ?? vorher(t, s)}`),
-      ...warnungen,
-      strich,
-    ].slice(0, Math.max(0, hoehe - 2))
-    const platz = Math.max(0, hoehe - 2 - oben.length)
-    const mitte = platz > 0 ? mitschrift.slice(-platz) : []
-    while (mitte.length < platz) mitte.push('')
-    return [...oben, ...mitte, strich, fuss].map((z) => kuerze(z, breite))
+      ...tickets.map((t) => `  #${t.number} ${state.get(t.number) ?? before(t, s)}`),
+      ...warnings,
+      rule,
+    ].slice(0, Math.max(0, height - 2))
+    const room = Math.max(0, height - 2 - top.length)
+    const middle = room > 0 ? transcript.slice(-room) : []
+    while (middle.length < room) middle.push('')
+    return [...top, ...middle, rule, footer].map((l) => truncate(l, width))
   }
 
-  return { melde, bildschirm }
+  return { report, screen }
 }
 
-/** Zustand eines Tickets, das dieser Lauf (noch) nicht angefasst hat, wie die Engine ihn meldet. */
-function vorher(t: GraphTicket, s: ReturnType<typeof stil>): string {
-  switch (t.zustand) {
-    case 'geschlossen':
-      return s.gruen('✔ erledigt')
+/** State of a ticket this run has not touched (yet), as the engine reports it. */
+function before(t: GraphTicket, s: ReturnType<typeof style>): string {
+  switch (t.state) {
+    case 'closed':
+      return s.green('✔ done')
     case 'ready-for-human':
-      return s.matt('– ready-for-human, nicht angefasst')
-    case 'nicht freigegeben':
-      return s.matt('– nicht freigegeben')
-    case 'blockiert': {
-      const blocker = t.blocker.filter((b) => b.offen).map((b) => `#${b.nummer}`)
-      return s.matt(`○ blockiert von ${blocker.join(', ')}`)
+      return s.dim('– ready-for-human, not touched')
+    case 'not released':
+      return s.dim('– not released')
+    case 'blocked': {
+      const blockers = t.blockers.filter((b) => b.open).map((b) => `#${b.number}`)
+      return s.dim(`○ blocked by ${blockers.join(', ')}`)
     }
-    case 'vergeben':
-    case 'bearbeitbar':
-      return s.matt('· wartet')
+    case 'taken':
+    case 'workable':
+      return s.dim('· waiting')
   }
 }
 
-/** Kürzt auf `breite` sichtbare Zeichen, ohne eine Farbsequenz zu zerschneiden. */
-function kuerze(zeile: string, breite: number): string {
-  const z = zeile.replace(/[\r\n]+/g, ' ').replace(/\t/g, '  ')
-  if (stripVTControlCharacters(z).length <= breite) return z
-  let rest = breite - 1
-  let aus = ''
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI-Farbsequenzen
-  for (const teil of z.split(/(\x1b\[[\d;]*m)/)) {
-    if (teil.startsWith('\x1b')) aus += teil
+/** Truncates to `width` visible characters without cutting a colour sequence. */
+function truncate(line: string, width: number): string {
+  const l = line.replace(/[\r\n]+/g, ' ').replace(/\t/g, '  ')
+  if (stripVTControlCharacters(l).length <= width) return l
+  let rest = width - 1
+  let out = ''
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI colour sequences
+  for (const part of l.split(/(\x1b\[[\d;]*m)/)) {
+    if (part.startsWith('\x1b')) out += part
     else if (rest < 0) continue
-    else if (teil.length <= rest) {
-      aus += teil
-      rest -= teil.length
+    else if (part.length <= rest) {
+      out += part
+      rest -= part.length
     } else {
-      aus += `${teil.slice(0, rest)}…`
+      out += `${part.slice(0, rest)}…`
       rest = -1
     }
   }
-  return aus
+  return out
 }
 
 /**
- * Zeigt die Tafel im Terminal `out` (alternativer Bildschirm) und zeichnet sie bei jedem
- * Ereignis und jeder Größenänderung neu. Am Ende des Laufs kehrt sie zum normalen Bildschirm
- * zurück und schreibt dort den Schluss: Übersicht, Integration-Branch, Abschluss.
+ * Shows the board in the terminal `out` (alternate screen) and redraws it on every event and
+ * every resize. At the end of the run it returns to the normal screen and writes the closing
+ * lines there: summary, integration branch, finish.
  */
-export function zeigeTafel(out: NodeJS.WriteStream, protokoll?: string) {
-  const t = tafel({ farbe: true, protokoll })
-  let aktiv = true
-  const zeichne = () => {
-    const zeilen = t.bildschirm(out.columns || 100, out.rows || 30)
-    if (aktiv) out.write(`\x1b[H${zeilen.join('\x1b[K\n')}\x1b[K\x1b[J`)
+export function showBoard(out: NodeJS.WriteStream, logDir?: string) {
+  const b = board({ color: true, logDir })
+  let active = true
+  const draw = () => {
+    const lines = b.screen(out.columns || 100, out.rows || 30)
+    if (active) out.write(`\x1b[H${lines.join('\x1b[K\n')}\x1b[K\x1b[J`)
   }
-  /** Zurück zum normalen Bildschirm; auch vor einer Fehlermeldung, damit sie sichtbar bleibt. */
-  const schliesse = () => {
-    if (!aktiv) return
-    aktiv = false
-    out.off('resize', zeichne)
+  /** Back to the normal screen; also before an error message, so it stays visible. */
+  const close = () => {
+    if (!active) return
+    active = false
+    out.off('resize', draw)
     out.write('\x1b[?7h\x1b[?25h\x1b[?1049l')
   }
-  // Alternativer Bildschirm, Cursor aus, kein Zeilenumbruch: Was trotz Kürzung zu breit ist
-  // (doppelt breite Zeichen), schneidet das Terminal ab, statt die Tafel zu verschieben.
+  // Alternate screen, cursor off, no line wrap: whatever is too wide despite truncation
+  // (double-width characters) the terminal cuts off instead of shifting the board.
   out.write('\x1b[?1049h\x1b[?25l\x1b[?7l')
-  out.on('resize', zeichne)
-  process.once('exit', schliesse)
-  const melde = (e: Ereignis) => {
-    const zeilen = t.melde(e)
-    if (e.art !== 'lauf-beendet') return zeichne()
-    schliesse()
-    for (const z of zeilen) out.write(`${z}\n`)
+  out.on('resize', draw)
+  process.once('exit', close)
+  const report = (e: Event) => {
+    const lines = b.report(e)
+    if (e.type !== 'run-finished') return draw()
+    close()
+    for (const l of lines) out.write(`${l}\n`)
   }
-  return { melde, schliesse }
+  return { report, close }
 }

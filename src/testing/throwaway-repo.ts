@@ -4,30 +4,30 @@ import { join } from 'node:path'
 import { git } from '../git.ts'
 
 /**
- * Wegwerf-Repo im Temp-Verzeichnis: ein Bare-Remote und ein Klon davon,
- * `main` mit dem Commit „init“ gepusht.
+ * Throwaway repo in the temp directory: a bare remote and a clone of it, `main` pushed with the
+ * commit "init".
  */
-export function wegwerfRepo(): { remote: string; klon: string; neuerKlon: () => string } {
-  const basis = mkdtempSync(join(tmpdir(), 'groundhog-'))
-  const remote = join(basis, 'remote.git')
-  git(basis, 'init', '--bare', '-b', 'main', remote)
-  let klone = 0
-  const neuerKlon = () => {
-    const klon = join(basis, `klon-${klone++}`)
-    git(basis, 'clone', '-q', remote, klon)
-    git(klon, 'config', 'user.name', 'Test')
-    git(klon, 'config', 'user.email', 'test@example.com')
-    return klon
+export function throwawayRepo(): { remote: string; clone: string; newClone: () => string } {
+  const base = mkdtempSync(join(tmpdir(), 'groundhog-'))
+  const remote = join(base, 'remote.git')
+  git(base, 'init', '--bare', '-b', 'main', remote)
+  let clones = 0
+  const newClone = () => {
+    const clone = join(base, `clone-${clones++}`)
+    git(base, 'clone', '-q', remote, clone)
+    git(clone, 'config', 'user.name', 'Test')
+    git(clone, 'config', 'user.email', 'test@example.com')
+    return clone
   }
-  const klon = neuerKlon()
-  commitDatei(klon, 'README.md', 'init', 'init')
-  git(klon, 'push', '-q', 'origin', 'main')
-  return { remote, klon, neuerKlon }
+  const clone = newClone()
+  commitFile(clone, 'README.md', 'init', 'init')
+  git(clone, 'push', '-q', 'origin', 'main')
+  return { remote, clone, newClone }
 }
 
-/** Schreibt eine Datei und committet sie auf dem ausgecheckten Branch. */
-export function commitDatei(verzeichnis: string, datei: string, inhalt: string, message: string) {
-  writeFileSync(join(verzeichnis, datei), inhalt)
-  git(verzeichnis, 'add', datei)
-  git(verzeichnis, 'commit', '-q', '-m', message)
+/** Writes a file and commits it on the checked-out branch. */
+export function commitFile(directory: string, file: string, content: string, message: string) {
+  writeFileSync(join(directory, file), content)
+  git(directory, 'add', file)
+  git(directory, 'commit', '-q', '-m', message)
 }

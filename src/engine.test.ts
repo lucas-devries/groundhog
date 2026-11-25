@@ -1,399 +1,404 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent, type RunAuftrag } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { type Ereignis, fahreLauf } from './engine.ts'
+import { type AgentScript, fakeAgent, type SessionRequest } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { driveRun, type Event } from './engine.ts'
 import { git } from './git.ts'
-import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { passthrough } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
-/** Fährt einen Lauf über Spec 1 mit Ziel-Branch main; liefert die Ereignisse. */
-async function lauf(
-  verzeichnis: string,
+/** Drives a run over spec 1 with target branch main; returns the events. */
+async function run(
+  directory: string,
   tracker: InMemoryTracker,
-  skript: AgentSkript[],
+  script: AgentScript[],
   checks = ['true'],
-  versuche?: number,
-): Promise<Ereignis[]> {
-  const ereignisse: Ereignis[] = []
-  await fahreLauf({
+  attempts?: number,
+): Promise<Event[]> {
+  const events: Event[] = []
+  await driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis,
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory,
     checks,
-    maxVersuche: versuche,
+    maxAttempts: attempts,
     tracker,
-    agent: fakeAgent(skript),
-    sandbox: durchreiche,
-    uhr: steuerbareUhr(),
-    melde: (e) => ereignisse.push(e),
+    agent: fakeAgent(script),
+    sandbox: passthrough,
+    clock: manualClock(),
+    report: (e) => events.push(e),
   })
-  return ereignisse
+  return events
 }
 
-const einTicket = () =>
-  new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, labels: ['ready-for-agent'], assignees: [], blocker: [] },
+const oneTicket = () =>
+  new InMemoryTracker('me', [
+    { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },
   ])
 
-const commitet: AgentSkript = ({ verzeichnis }) => {
-  commitDatei(verzeichnis, 'a.txt', 'a', 'Ticket 2 umsetzen')
-  return { erfolg: true }
+const commits: AgentScript = ({ directory }) => {
+  commitFile(directory, 'a.txt', 'a', 'Implement ticket 2')
+  return { success: true }
 }
 
-test('ein grünes Ticket landet im Integration-Branch, wird gepusht und geschlossen', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = einTicket()
+test('a green ticket lands in the integration branch, is pushed and closed', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = oneTicket()
 
-  await lauf(klon, tracker, [
-    (auftrag) => {
-      commitet(auftrag)
-      git(auftrag.verzeichnis, 'push', '-q', 'origin', 'ticket/2')
-      return { erfolg: true }
+  await run(clone, tracker, [
+    (request) => {
+      commits(request)
+      git(request.directory, 'push', '-q', 'origin', 'ticket/2')
+      return { success: true }
     },
   ])
 
-  expect(tracker.ticket(2)).toMatchObject({ offen: false, assignees: ['ich'] })
-  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
-  expect(git(klon, 'rev-parse', 'spec/1')).toBe(git(remote, 'rev-parse', 'spec/1'))
-  expect(git(klon, 'branch', '--list', 'ticket/*')).toBe('')
+  expect(tracker.ticket(2)).toMatchObject({ open: false, assignees: ['me'] })
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+  expect(git(clone, 'rev-parse', 'spec/1')).toBe(git(remote, 'rev-parse', 'spec/1'))
+  expect(git(clone, 'branch', '--list', 'ticket/*')).toBe('')
   expect(git(remote, 'branch', '--list', 'ticket/*')).toBe('')
 })
 
-test('die Engine beansprucht das Ticket vor dem Run und gibt den Abzweig als Fixpunkt mit', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = einTicket()
-  let imRun: unknown
+test('the engine claims the ticket before the session and passes the branch-off as fork point', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = oneTicket()
+  let inSession: unknown
 
-  await lauf(klon, tracker, [
-    (auftrag) => {
-      imRun = {
+  await run(clone, tracker, [
+    (request) => {
+      inSession = {
         assignees: tracker.ticket(2).assignees,
-        fixpunkt: auftrag.fixpunkt,
-        branch: git(auftrag.verzeichnis, 'branch', '--show-current'),
+        forkPoint: request.forkPoint,
+        branch: git(request.directory, 'branch', '--show-current'),
       }
-      return commitet(auftrag)
+      return commits(request)
     },
   ])
 
-  expect(imRun).toEqual({
-    assignees: ['ich'],
-    fixpunkt: git(remote, 'rev-parse', 'main'),
+  expect(inSession).toEqual({
+    assignees: ['me'],
+    forkPoint: git(remote, 'rev-parse', 'main'),
     branch: 'ticket/2',
   })
 })
 
-test('der Integration-Branch zweigt vom frisch geholten origin/<Ziel-Branch> ab', async () => {
-  const { remote, klon, neuerKlon } = wegwerfRepo()
-  const anderer = neuerKlon()
-  commitDatei(anderer, 'b.txt', 'b', 'anderswo gepusht')
-  git(anderer, 'push', '-q', 'origin', 'main')
-  commitDatei(klon, 'c.txt', 'c', 'nur lokal auf main')
+test('the integration branch forks off the freshly fetched origin/<target branch>', async () => {
+  const { remote, clone, newClone } = throwawayRepo()
+  const other = newClone()
+  commitFile(other, 'b.txt', 'b', 'pushed elsewhere')
+  git(other, 'push', '-q', 'origin', 'main')
+  commitFile(clone, 'c.txt', 'c', 'only local on main')
 
-  await lauf(klon, einTicket(), [commitet])
+  await run(clone, oneTicket(), [commits])
 
   expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe(
-    'Ticket 2 umsetzen\nanderswo gepusht\ninit',
+    'Implement ticket 2\npushed elsewhere\ninit',
   )
 })
 
-test('ein vorhandener Integration-Branch wird weiterverwendet', async () => {
-  const { remote, klon } = wegwerfRepo()
-  git(klon, 'checkout', '-q', '-b', 'spec/1')
-  commitDatei(klon, 'v.txt', 'v', 'voriger Lauf')
-  git(klon, 'checkout', '-q', 'main')
+test('an existing integration branch is reused', async () => {
+  const { remote, clone } = throwawayRepo()
+  git(clone, 'checkout', '-q', '-b', 'spec/1')
+  commitFile(clone, 'v.txt', 'v', 'previous run')
+  git(clone, 'checkout', '-q', 'main')
 
-  await lauf(klon, einTicket(), [commitet])
+  await run(clone, oneTicket(), [commits])
 
-  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\nvoriger Lauf\ninit')
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\nprevious run\ninit')
 })
 
-test.each<[string, AgentSkript]>([
+test.each<[string, AgentScript]>([
   [
-    'Run erfolgreich',
-    (auftrag) => {
-      commitet(auftrag)
-      return { erfolg: false }
+    'Session successful',
+    (request) => {
+      commits(request)
+      return { success: false }
     },
   ],
   [
-    'HEAD auf ticket/2',
-    (auftrag) => {
-      commitet(auftrag)
-      git(auftrag.verzeichnis, 'checkout', '-q', '-b', 'woanders')
-      return { erfolg: true }
+    'HEAD on ticket/2',
+    (request) => {
+      commits(request)
+      git(request.directory, 'checkout', '-q', '-b', 'elsewhere')
+      return { success: true }
     },
   ],
-  ['neuer Commit seit Fixpunkt', () => ({ erfolg: true })],
+  ['new commit since fork point', () => ({ success: true })],
   [
-    'Arbeitsverzeichnis sauber',
-    (auftrag) => {
-      commitet(auftrag)
-      writeFileSync(join(auftrag.verzeichnis, 'offen.txt'), 'x')
-      return { erfolg: true }
+    'working tree clean',
+    (request) => {
+      commits(request)
+      writeFileSync(join(request.directory, 'open.txt'), 'x')
+      return { success: true }
     },
   ],
-])('Prüfung „%s“ rot im letzten Versuch: Ticket geht an einen Menschen', async (rot, schritt) => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = einTicket()
+])('verification "%s" red in the last attempt: the ticket goes to a human', async (red, step) => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = oneTicket()
 
-  const ereignisse = await lauf(
-    klon,
+  const events = await run(
+    clone,
     tracker,
     [
-      (auftrag) => {
-        git(auftrag.verzeichnis, 'push', '-q', 'origin', 'ticket/2')
-        return schritt(auftrag)
+      (request) => {
+        git(request.directory, 'push', '-q', 'origin', 'ticket/2')
+        return step(request)
       },
     ],
-    ['touch check-lief'],
+    ['touch check-ran'],
     1,
   )
 
   expect(tracker.ticket(2)).toEqual({
-    nummer: 2,
-    offen: true,
+    number: 2,
+    open: true,
     assignees: [],
-    blocker: [],
+    blockers: [],
     labels: ['ready-for-human'],
   })
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
-  expect(git(klon, 'branch', '--list', 'ticket/*')).toBe('')
+  expect(git(clone, 'branch', '--list', 'ticket/*')).toBe('')
   expect(git(remote, 'branch', '--list', 'ticket/*')).toBe('')
-  expect(git(klon, 'status', '--porcelain')).toBe('')
-  expect(git(klon, 'branch', '--show-current')).toBe('spec/1')
-  const pruefungen = ereignisse.filter((e) => e.art === 'pruefung')
-  expect(pruefungen.filter((p) => !p.ok).map((p) => p.name)).toEqual([rot])
-  expect(existsSync(join(klon, 'check-lief'))).toBe(false)
+  expect(git(clone, 'status', '--porcelain')).toBe('')
+  expect(git(clone, 'branch', '--show-current')).toBe('spec/1')
+  const verifications = events.filter((e) => e.type === 'verification')
+  expect(verifications.filter((v) => !v.ok).map((v) => v.name)).toEqual([red])
+  expect(existsSync(join(clone, 'check-ran'))).toBe(false)
 })
 
-test('Checks laufen in Reihenfolge im Repo-Root, beim ersten roten ist Schluss', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = einTicket()
+test('checks run in order in the repo root, the first red one ends it', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = oneTicket()
 
-  const ereignisse = await lauf(
-    klon,
+  const events = await run(
+    clone,
     tracker,
-    [commitet],
-    ['test -f a.txt', 'false', 'touch zu-weit'],
+    [commits],
+    ['test -f a.txt', 'false', 'touch too-far'],
     1,
   )
 
-  expect(tracker.ticket(2).offen).toBe(true)
+  expect(tracker.ticket(2).open).toBe(true)
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
-  expect(existsSync(join(klon, 'zu-weit'))).toBe(false)
+  expect(existsSync(join(clone, 'too-far'))).toBe(false)
   expect(
-    ereignisse.filter((e) => e.art === 'pruefung' && e.name.startsWith('Check')),
+    events.filter((e) => e.type === 'verification' && e.name.startsWith('Check')),
   ).toMatchObject([
     { name: 'Check: test -f a.txt', ok: true },
     { name: 'Check: false', ok: false },
   ])
 })
 
-test('ein roter Versuch bekommt einen frischen Run auf demselben Ticket-Branch mit der Check-Ausgabe', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = einTicket()
-  const auftraege: RunAuftrag[] = []
+test('a red attempt gets a fresh session on the same ticket branch with the check output', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = oneTicket()
+  const requests: SessionRequest[] = []
 
-  await lauf(
-    klon,
+  await run(
+    clone,
     tracker,
     [
-      (auftrag) => {
-        auftraege.push(auftrag)
-        return commitet(auftrag)
+      (request) => {
+        requests.push(request)
+        return commits(request)
       },
-      (auftrag) => {
-        auftraege.push(auftrag)
-        commitDatei(auftrag.verzeichnis, 'b.txt', 'b', 'Test reparieren')
-        return { erfolg: true }
+      (request) => {
+        requests.push(request)
+        commitFile(request.directory, 'b.txt', 'b', 'Fix the test')
+        return { success: true }
       },
     ],
-    ['test -f b.txt || { echo b.txt fehlt; exit 1; }'],
+    ['test -f b.txt || { echo b.txt missing; exit 1; }'],
   )
 
-  expect(tracker.ticket(2).offen).toBe(false)
-  expect(auftraege.map((a) => a.fixpunkt)).toEqual([
+  expect(tracker.ticket(2).open).toBe(false)
+  expect(requests.map((r) => r.forkPoint)).toEqual([
     git(remote, 'rev-parse', 'main'),
     git(remote, 'rev-parse', 'main'),
   ])
-  expect(auftraege[0]?.rueckmeldung).toBeUndefined()
-  expect(auftraege[1]?.rueckmeldung).toContain('test -f b.txt')
-  expect(auftraege[1]?.rueckmeldung).toContain('b.txt fehlt')
+  expect(requests[0]?.feedback).toBeUndefined()
+  expect(requests[1]?.feedback).toContain('test -f b.txt')
+  expect(requests[1]?.feedback).toContain('b.txt missing')
 })
 
-test('ohne Angabe gibt es 3 Versuche; auch ein gescheiterter Run verbraucht einen', async () => {
-  const { klon } = wegwerfRepo()
-  const tracker = einTicket()
-  const rueckmeldungen: (string | undefined)[] = []
-  const merke: AgentSkript = (auftrag) => {
-    rueckmeldungen.push(auftrag.rueckmeldung)
-    return { erfolg: false }
+test('without a setting there are 3 attempts; a failed session uses one up too', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = oneTicket()
+  const feedbacks: (string | undefined)[] = []
+  const remember: AgentScript = (request) => {
+    feedbacks.push(request.feedback)
+    return { success: false }
   }
 
-  const ereignisse = await lauf(klon, tracker, [() => ({ erfolg: true }), merke, merke, merke])
+  const events = await run(clone, tracker, [
+    () => ({ success: true }),
+    remember,
+    remember,
+    remember,
+  ])
 
-  expect(rueckmeldungen).toHaveLength(2)
-  expect(rueckmeldungen[0]).toContain('neuer Commit seit Fixpunkt')
-  expect(rueckmeldungen[1]).toContain('Run erfolgreich')
+  expect(feedbacks).toHaveLength(2)
+  expect(feedbacks[0]).toContain('new commit since fork point')
+  expect(feedbacks[1]).toContain('Session successful')
   expect(tracker.ticket(2).labels).toEqual(['ready-for-human'])
-  expect(ereignisse.filter((e) => e.art === 'versuch-begonnen')).toMatchObject([
-    { versuch: 1, von: 3 },
-    { versuch: 2, von: 3 },
-    { versuch: 3, von: 3 },
+  expect(events.filter((e) => e.type === 'attempt-started')).toMatchObject([
+    { attempt: 1, of: 3 },
+    { attempt: 2, of: 3 },
+    { attempt: 3, of: 3 },
   ])
 })
 
-test('ein Versuch, der den Ticket-Branch verlassen hat, macht auf dem Ticket-Branch weiter', async () => {
-  const { klon } = wegwerfRepo()
-  const tracker = einTicket()
-  let imZweitenRun: unknown
+test('an attempt that left the ticket branch continues on the ticket branch', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = oneTicket()
+  let inSecondSession: unknown
 
-  await lauf(klon, tracker, [
-    (auftrag) => {
-      commitet(auftrag)
-      git(auftrag.verzeichnis, 'checkout', '-q', '-b', 'woanders')
-      return { erfolg: true }
+  await run(clone, tracker, [
+    (request) => {
+      commits(request)
+      git(request.directory, 'checkout', '-q', '-b', 'elsewhere')
+      return { success: true }
     },
-    ({ verzeichnis }) => {
-      imZweitenRun = {
-        branch: git(verzeichnis, 'branch', '--show-current'),
-        log: git(verzeichnis, 'log', '--format=%s'),
+    ({ directory }) => {
+      inSecondSession = {
+        branch: git(directory, 'branch', '--show-current'),
+        log: git(directory, 'log', '--format=%s'),
       }
-      return { erfolg: true }
+      return { success: true }
     },
   ])
 
-  expect(imZweitenRun).toEqual({ branch: 'ticket/2', log: 'Ticket 2 umsetzen\ninit' })
-  expect(tracker.ticket(2).offen).toBe(false)
+  expect(inSecondSession).toEqual({ branch: 'ticket/2', log: 'Implement ticket 2\ninit' })
+  expect(tracker.ticket(2).open).toBe(false)
 })
 
-test('ein vorhandener Ticket-Branch wird beim ersten Versuch frisch abgezweigt', async () => {
-  const { remote, klon } = wegwerfRepo()
-  git(klon, 'checkout', '-q', '-b', 'ticket/2')
-  commitDatei(klon, 'alt.txt', 'alt', 'Rest eines alten Laufs')
-  git(klon, 'checkout', '-q', 'main')
+test('an existing ticket branch is forked off afresh in the first attempt', async () => {
+  const { remote, clone } = throwawayRepo()
+  git(clone, 'checkout', '-q', '-b', 'ticket/2')
+  commitFile(clone, 'old.txt', 'old', 'Remnant of an old run')
+  git(clone, 'checkout', '-q', 'main')
 
-  await lauf(klon, einTicket(), [commitet])
+  await run(clone, oneTicket(), [commits])
 
-  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
 })
 
-test('hat der Agent das Ticket in einem roten Versuch geschlossen, öffnet die Engine es wieder', async () => {
-  const { klon } = wegwerfRepo()
-  const tracker = einTicket()
-  let offenImZweitenRun: boolean | undefined
+test('if the agent closed the ticket in a red attempt, the engine reopens it', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = oneTicket()
+  let openInSecondSession: boolean | undefined
 
-  await lauf(
-    klon,
+  await run(
+    clone,
     tracker,
     [
       async () => {
-        await tracker.schliesse(2)
-        return { erfolg: true }
+        await tracker.close(2)
+        return { success: true }
       },
       async () => {
-        offenImZweitenRun = tracker.ticket(2).offen
-        await tracker.schliesse(2)
-        return { erfolg: true }
+        openInSecondSession = tracker.ticket(2).open
+        await tracker.close(2)
+        return { success: true }
       },
     ],
     undefined,
     2,
   )
 
-  expect(offenImZweitenRun).toBe(true)
-  expect(tracker.ticket(2)).toMatchObject({ offen: true, labels: ['ready-for-human'] })
+  expect(openInSecondSession).toBe(true)
+  expect(tracker.ticket(2)).toMatchObject({ open: true, labels: ['ready-for-human'] })
 })
 
-test('nach einem gescheiterten Ticket geht es mit der restlichen Frontier weiter', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
-    { nummer: 3, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
+test('after a failed ticket it goes on with the rest of the frontier', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [
+    { number: 2, open: true, assignees: [], labels: ['ready-for-agent'], blockers: [] },
+    { number: 3, open: true, assignees: [], labels: ['ready-for-agent'], blockers: [] },
   ])
 
-  const ereignisse = await lauf(
-    klon,
+  const events = await run(
+    clone,
     tracker,
     [
-      (auftrag) => {
-        commitet(auftrag)
-        return { erfolg: false }
+      (request) => {
+        commits(request)
+        return { success: false }
       },
-      ({ verzeichnis }) => {
-        commitDatei(verzeichnis, 'b.txt', 'b', 'Ticket 3 umsetzen')
-        return { erfolg: true }
+      ({ directory }) => {
+        commitFile(directory, 'b.txt', 'b', 'Implement ticket 3')
+        return { success: true }
       },
     ],
     undefined,
     1,
   )
 
-  expect(tracker.ticket(3).offen).toBe(false)
-  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 3 umsetzen\ninit')
-  expect(ereignisse.filter((e) => e.art === 'ticket-gescheitert')).toMatchObject([
-    { ticket: 2, versuche: 1, pruefung: 'Run erfolgreich' },
+  expect(tracker.ticket(3).open).toBe(false)
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 3\ninit')
+  expect(events.filter((e) => e.type === 'ticket-failed')).toMatchObject([
+    { ticket: 2, attempts: 1, verification: 'Session successful' },
   ])
 })
 
-test('mehrere Commits seit dem Fixpunkt werden zu einem mit allen Messages', async () => {
-  const { remote, klon } = wegwerfRepo()
+test('several commits since the fork point become one with all messages', async () => {
+  const { remote, clone } = throwawayRepo()
 
-  await lauf(klon, einTicket(), [
-    (auftrag) => {
-      commitet(auftrag)
-      commitDatei(auftrag.verzeichnis, 'b.txt', 'b', 'Review-Befunde beheben\n\nDetails')
-      return { erfolg: true }
+  await run(clone, oneTicket(), [
+    (request) => {
+      commits(request)
+      commitFile(request.directory, 'b.txt', 'b', 'Fix review findings\n\nDetails')
+      return { success: true }
     },
   ])
 
   expect(git(remote, 'log', '--format=%B', 'spec/1')).toBe(
-    'Ticket 2 umsetzen\n\nReview-Befunde beheben\n\nDetails\n\ninit',
+    'Implement ticket 2\n\nFix review findings\n\nDetails\n\ninit',
   )
   expect(git(remote, 'show', '--format=', '--name-only', 'spec/1')).toBe('a.txt\nb.txt')
 })
 
-test('die Check-Ausgabe für den nächsten Run ist von vorn auf 100 Zeilen gekürzt', async () => {
-  const { klon } = wegwerfRepo()
-  let rueckmeldung: string | undefined
+test('the check output for the next session is truncated from the start to 100 lines', async () => {
+  const { clone } = throwawayRepo()
+  let feedback: string | undefined
 
-  await lauf(
-    klon,
-    einTicket(),
+  await run(
+    clone,
+    oneTicket(),
     [
-      commitet,
-      (auftrag) => {
-        rueckmeldung = auftrag.rueckmeldung
-        return { erfolg: true }
+      commits,
+      (request) => {
+        feedback = request.feedback
+        return { success: true }
       },
     ],
     ['seq 1 150; exit 1'],
     2,
   )
 
-  expect(rueckmeldung).toContain('gekürzt')
-  expect(rueckmeldung).toContain('\n51\n')
-  expect(rueckmeldung).not.toContain('\n50\n')
-  expect(rueckmeldung?.endsWith('\n150')).toBe(true)
+  expect(feedback).toContain('truncated')
+  expect(feedback).toContain('\n51\n')
+  expect(feedback).not.toContain('\n50\n')
+  expect(feedback?.endsWith('\n150')).toBe(true)
 })
 
-test('ein von einem gescheiterten Ticket abhängiges Ticket bleibt liegen', async () => {
-  const { klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, assignees: [], labels: ['ready-for-agent'], blocker: [] },
+test('a ticket depending on a failed ticket stays put', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [
+    { number: 2, open: true, assignees: [], labels: ['ready-for-agent'], blockers: [] },
     {
-      nummer: 3,
-      offen: true,
+      number: 3,
+      open: true,
       assignees: [],
       labels: ['ready-for-agent'],
-      blocker: [{ nummer: 2, offen: true }],
+      blockers: [{ number: 2, open: true }],
     },
   ])
 
-  await lauf(klon, tracker, [() => ({ erfolg: false })], undefined, 1)
+  await run(clone, tracker, [() => ({ success: false })], undefined, 1)
 
-  expect(tracker.ticket(3)).toMatchObject({ offen: true, assignees: [] })
+  expect(tracker.ticket(3)).toMatchObject({ open: true, assignees: [] })
 })

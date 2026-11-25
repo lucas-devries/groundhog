@@ -12,42 +12,42 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { git } from './git.ts'
-import { type MenueDialog, type Start, type StartOptionen, starte } from './start.ts'
-import { type ClaudeAntwort, fakeClaude } from './testing/fake-claude.ts'
-import { aufnahme, fakeGh, type GhAntwort } from './testing/fake-gh.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { type MenuDialog, type Start, type StartOptions, start } from './start.ts'
+import { type ClaudeAnswer, fakeClaude } from './testing/fake-claude.ts'
+import { fakeGh, type GhAnswer, recording } from './testing/fake-gh.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 
-const ABBRUCH = Symbol('Strg+C')
+const CANCEL = Symbol('Ctrl+C')
 
-/** Geskripteter Dialog: beantwortet die Fragen der Reihe nach und hält alles Gezeigte fest. */
-function fakeDialog(antworten: (string | boolean | symbol)[]) {
-  const gezeigt: Record<string, unknown>[] = []
-  const antworte = async (frage: Record<string, unknown>) => {
-    gezeigt.push(frage)
-    if (antworten.length === 0) throw new Error(`keine Antwort für ${JSON.stringify(frage)}`)
-    return antworten.shift()
+/** Scripted dialog: answers the questions in order and records everything shown. */
+function fakeDialog(answers: (string | boolean | symbol)[]) {
+  const shown: Record<string, unknown>[] = []
+  const answer = async (question: Record<string, unknown>) => {
+    shown.push(question)
+    if (answers.length === 0) throw new Error(`no answer for ${JSON.stringify(question)}`)
+    return answers.shift()
   }
   const dialog = {
-    note: (text: string, titel: string) => gezeigt.push({ art: 'note', titel, text }),
-    warn: (text: string) => gezeigt.push({ art: 'warn', text }),
-    outro: (text: string) => gezeigt.push({ art: 'outro', text }),
-    select: (o: object) => antworte({ art: 'select', ...o }),
-    confirm: (o: object) => antworte({ art: 'confirm', ...o }),
-  } as MenueDialog
-  return { dialog, gezeigt }
+    note: (text: string, title: string) => shown.push({ kind: 'note', title, text }),
+    warn: (text: string) => shown.push({ kind: 'warn', text }),
+    outro: (text: string) => shown.push({ kind: 'outro', text }),
+    select: (o: object) => answer({ kind: 'select', ...o }),
+    confirm: (o: object) => answer({ kind: 'confirm', ...o }),
+  } as MenuDialog
+  return { dialog, shown }
 }
 
-const GH_VERSION = { ausgabe: 'gh version 2.94.0 (2026-05-01)\nhttps://github.com/cli/cli\n' }
-const TOKEN = { ausgabe: 'gho_geheim\n' }
-const NUTZER = { ausgabe: 'lucas\n' }
+const GH_VERSION = { output: 'gh version 2.94.0 (2026-05-01)\nhttps://github.com/cli/cli\n' }
+const TOKEN = { output: 'gho_secret\n' }
+const USER = { output: 'lucas\n' }
 
-const CLAUDE_VERSION: ClaudeAntwort = { aufnahme: 'claude-version.txt' }
-/** `claude auth status` eines angemeldeten `claude`. */
-const ANGEMELDET: ClaudeAntwort = {}
-const MIT_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-with-skills.jsonl' }
-const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-without-skills.jsonl' }
+const CLAUDE_VERSION: ClaudeAnswer = { recording: 'claude-version.txt' }
+/** `claude auth status` of a logged-in `claude`. */
+const LOGGED_IN: ClaudeAnswer = {}
+const WITH_SKILLS: ClaudeAnswer = { recording: 'claude-init-with-skills.jsonl' }
+const WITHOUT_SKILLS: ClaudeAnswer = { recording: 'claude-init-without-skills.jsonl' }
 
-const KONFIGURATION = {
+const CONFIG = {
   checks: ['npm ci', 'npm test'],
   attempts: 4,
   targetBranches: ['main', 'develop'],
@@ -55,76 +55,76 @@ const KONFIGURATION = {
 }
 
 /**
- * Ein startbereiter Klon von Spec #25: Konfiguration committet, `develop` auf dem Remote, `gh` und
- * `claude` als Fakes allein im `PATH` (neben `git` und `node`).
+ * A clone of spec #25 ready to start: config committed, `develop` on the remote, `gh` and
+ * `claude` as fakes alone in the `PATH` (next to `git` and `node`).
  */
-function bereit({
-  gh = [GH_VERSION, TOKEN, NUTZER, aufnahme('start-check-spec-25.json')],
-  konfiguration = KONFIGURATION as object | null,
-  claude = [CLAUDE_VERSION, ANGEMELDET, MIT_SKILLS] as ClaudeAntwort[] | null,
-  ohne = [] as string[],
+function ready({
+  gh = [GH_VERSION, TOKEN, USER, recording('start-check-spec-25.json')],
+  config = CONFIG as object | null,
+  claude = [CLAUDE_VERSION, LOGGED_IN, WITH_SKILLS] as ClaudeAnswer[] | null,
+  without = [] as string[],
 } = {}) {
-  const { klon } = wegwerfRepo()
-  if (konfiguration) {
-    commitDatei(klon, 'groundhog.json', JSON.stringify(konfiguration), 'konfiguration')
+  const { clone } = throwawayRepo()
+  if (config) {
+    commitFile(clone, 'groundhog.json', JSON.stringify(config), 'config')
   }
-  git(klon, 'push', '-q', 'origin', 'main', 'main:develop')
-  const fake = fakeGh([...gh, aufnahme('task-graph-spec-25.json')])
+  git(clone, 'push', '-q', 'origin', 'main', 'main:develop')
+  const fake = fakeGh([...gh, recording('task-graph-spec-25.json')])
   const claudeFake = claude && fakeClaude(claude)
-  if (ohne.includes('gh')) rmSync(join(fake.verzeichnis, 'gh'))
+  if (without.includes('gh')) rmSync(join(fake.directory, 'gh'))
   const bin = mkdtempSync(join(tmpdir(), 'bin-'))
-  for (const [name, ziel] of [
+  for (const [name, target] of [
     ['git', '/usr/bin/git'],
     ['node', process.execPath],
   ] as const) {
-    if (!ohne.includes(name)) symlinkSync(ziel, join(bin, name))
+    if (!without.includes(name)) symlinkSync(target, join(bin, name))
   }
-  const pfad = [fake.verzeichnis, claudeFake?.verzeichnis, bin].filter(Boolean)
-  return { klon, fake, claude: claudeFake, pfad: pfad.join(':') }
+  const path = [fake.directory, claudeFake?.directory, bin].filter(Boolean)
+  return { clone, fake, claude: claudeFake, path: path.join(':') }
 }
 
-const sperre = (klon: string) => join(klon, '.git', 'groundhog.lock')
+const lock = (clone: string) => join(clone, '.git', 'groundhog.lock')
 
-/** Startet mit dem `PATH` aus `bereit`; der Test selbst ruft danach wieder das echte `git`. */
-async function start(
-  { klon, pfad }: { klon: string; pfad: string },
-  antworten: (string | boolean | symbol)[],
-  optionen: Partial<StartOptionen> = {},
+/** Starts with the `PATH` from `ready`; the test itself calls the real `git` again afterwards. */
+async function run(
+  { clone, path }: { clone: string; path: string },
+  answers: (string | boolean | symbol)[],
+  options: Partial<StartOptions> = {},
 ) {
-  const { dialog, gezeigt } = fakeDialog(antworten)
-  vi.stubEnv('PATH', pfad)
-  const ergebnis: Start = await starte({
-    verzeichnis: klon,
+  const { dialog, shown } = fakeDialog(answers)
+  vi.stubEnv('PATH', path)
+  const result: Start = await start({
+    directory: clone,
     spec: 25,
     dialog,
-    istTerminal: true,
-    sandboxFehlt: () => [],
-    ...optionen,
+    isTerminal: true,
+    sandboxMissing: () => [],
+    ...options,
   }).finally(() => vi.unstubAllEnvs())
-  return { ergebnis, gezeigt }
+  return { result, shown }
 }
 
-test('das Menü zeigt den Lauf, fragt Ziel-Branch und Abschluss und sagt, dass keine Eingabe mehr nötig ist', async () => {
-  const { klon, fake, pfad } = bereit()
+test('the menu shows the run, asks for target branch and finish and says that no more input is needed', async () => {
+  const { clone, fake, path } = ready()
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['develop', 'mergen'])
+  const { result, shown } = await run({ clone, path }, ['develop', 'merge'])
 
-  expect(gezeigt).toEqual([
+  expect(shown).toEqual([
     {
-      art: 'note',
-      titel: 'Dieser Lauf',
+      kind: 'note',
+      title: 'This run',
       text: [
         'Spec #25',
-        '19 Tickets, davon 18 für den Agent freigegeben',
-        '#44: ready-for-human, wird nicht angefasst',
+        '19 tickets, 18 of them released for the agent',
+        '#44: ready-for-human, will not be touched',
         'Checks: npm ci · npm test',
-        'Sandbox: an (srt)',
-        'Versuche pro Ticket: 4',
+        'Sandbox: on (srt)',
+        'Attempts per ticket: 4',
       ].join('\n'),
     },
     {
-      art: 'select',
-      message: 'Ziel-Branch: Wohin fließt die Arbeit am Ende?',
+      kind: 'select',
+      message: 'Target branch: where does the work flow in the end?',
       options: [
         { value: 'main', label: 'main' },
         { value: 'develop', label: 'develop' },
@@ -132,281 +132,281 @@ test('das Menü zeigt den Lauf, fragt Ziel-Branch und Abschluss und sagt, dass k
       initialValue: 'main',
     },
     {
-      art: 'select',
-      message: 'Abschluss: Was geschieht mit spec/25, sobald alle Tickets geschlossen sind?',
+      kind: 'select',
+      message: 'Finish: what happens to spec/25 once all tickets are closed?',
       options: [
-        { value: 'mergen', label: 'Mergen', hint: 'groundhog mergt nach develop und pusht' },
-        { value: 'pr', label: 'PR', hint: 'groundhog öffnet einen PR nach develop' },
-        { value: 'nichts', label: 'Nichts', hint: 'spec/25 bleibt stehen' },
+        { value: 'merge', label: 'Merge', hint: 'groundhog merges into develop and pushes' },
+        { value: 'pr', label: 'PR', hint: 'groundhog opens a PR into develop' },
+        { value: 'none', label: 'None', hint: 'spec/25 stays' },
       ],
-      initialValue: 'mergen',
+      initialValue: 'merge',
     },
-    { art: 'outro', text: 'Ab hier ist keine Eingabe mehr nötig.' },
+    { kind: 'outro', text: 'No more input needed from here on.' },
   ])
-  if (!ergebnis.ok) throw new Error(ergebnis.meldung)
-  expect(ergebnis.auswahl).toEqual({ zielBranch: 'develop', abschluss: 'mergen' })
-  expect(ergebnis.token).toBe('gho_geheim')
-  expect(ergebnis.repoUrl).toBe('https://github.com/lucas-devries/groundhog')
-  expect(ergebnis.konfiguration.attempts).toBe(4)
-  expect(ergebnis.versionen).toEqual({
+  if (!result.ok) throw new Error(result.message)
+  expect(result.choice).toEqual({ targetBranch: 'develop', finish: 'merge' })
+  expect(result.token).toBe('gho_secret')
+  expect(result.repoUrl).toBe('https://github.com/lucas-devries/groundhog')
+  expect(result.config.attempts).toBe(4)
+  expect(result.versions).toEqual({
     claude: '2.1.0 (Claude Code)',
     'mattpocock-skills': '1.3.2',
   })
-  expect(ergebnis.sandbox).toBeDefined()
-  expect(existsSync(sperre(klon))).toBe(true)
-  ergebnis.freigeben()
-  expect(existsSync(sperre(klon))).toBe(false)
-  // Nur lesende Aufrufe an GitHub, kein Branch angelegt.
-  expect(fake.aufrufe().map((a) => a.args.slice(0, 2).join(' '))).toEqual([
+  expect(result.sandbox).toBeDefined()
+  expect(existsSync(lock(clone))).toBe(true)
+  result.release()
+  expect(existsSync(lock(clone))).toBe(false)
+  // Only reading calls to GitHub, no branch created.
+  expect(fake.calls().map((a) => a.args.slice(0, 2).join(' '))).toEqual([
     '--version',
     'auth token',
     'api user',
     'api graphql',
     'api graphql',
   ])
-  expect(git(klon, 'branch', '--list', 'spec/*')).toBe('')
+  expect(git(clone, 'branch', '--list', 'spec/*')).toBe('')
 })
 
-test('aus einem Unterverzeichnis startet der Lauf im Repo-Root', async () => {
-  const { klon, pfad } = bereit()
-  mkdirSync(join(klon, 'unter'))
+test('from a subdirectory the run starts in the repo root', async () => {
+  const { clone, path } = ready()
+  mkdirSync(join(clone, 'sub'))
 
-  const { ergebnis } = await start({ klon: join(klon, 'unter'), pfad }, ['main', 'pr'])
+  const { result } = await run({ clone: join(clone, 'sub'), path }, ['main', 'pr'])
 
-  expect(ergebnis).toMatchObject({ ok: true, verzeichnis: realpathSync(klon) })
+  expect(result).toMatchObject({ ok: true, directory: realpathSync(clone) })
 })
 
-test('der Start legt den Ordner des Protokolls vor dem Menü an', async () => {
-  const { klon, pfad } = bereit()
+test('the start creates the log folder before the menu', async () => {
+  const { clone, path } = ready()
 
-  const { ergebnis } = await start({ klon, pfad }, ['main', 'pr'])
+  const { result } = await run({ clone, path }, ['main', 'pr'])
 
-  if (!ergebnis.ok) throw new Error(ergebnis.meldung)
-  expect(ergebnis.protokoll.pfad).toMatch(/\.git\/groundhog\/runs\/\d{8}-\d{6}-spec-25$/)
-  expect(existsSync(ergebnis.protokoll.pfad)).toBe(true)
+  if (!result.ok) throw new Error(result.message)
+  expect(result.log.path).toMatch(/\.git\/groundhog\/runs\/\d{8}-\d{6}-spec-25$/)
+  expect(existsSync(result.log.path)).toBe(true)
 })
 
-test('lässt sich der Ordner des Protokolls nicht anlegen, bricht der Start vor dem Menü ab', async () => {
-  const { klon, pfad } = bereit()
-  writeFileSync(join(klon, '.git/groundhog'), 'kein Ordner')
+test('if the log folder cannot be created, the start aborts before the menu', async () => {
+  const { clone, path } = ready()
+  writeFileSync(join(clone, '.git/groundhog'), 'not a folder')
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [])
+  const { result, shown } = await run({ clone, path }, [])
 
-  expect(gezeigt).toEqual([])
-  expect(ergebnis).toMatchObject({ ok: false, exitCode: 1 })
-  expect(!ergebnis.ok && ergebnis.meldung).toMatch(/^Der Ordner des Protokolls lässt sich nicht/)
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(shown).toEqual([])
+  expect(result).toMatchObject({ ok: false, exitCode: 1 })
+  expect(!result.ok && result.message).toMatch(/^The log folder cannot be created/)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('bei main ist PR vorausgewählt', async () => {
-  const { klon, pfad } = bereit()
+test('with main, PR is preselected', async () => {
+  const { clone, path } = ready()
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['main', 'pr'])
+  const { result, shown } = await run({ clone, path }, ['main', 'pr'])
 
-  expect(gezeigt[2]).toMatchObject({ art: 'select', initialValue: 'pr' })
-  expect(ergebnis).toMatchObject({ ok: true, auswahl: { zielBranch: 'main', abschluss: 'pr' } })
+  expect(shown[2]).toMatchObject({ kind: 'select', initialValue: 'pr' })
+  expect(result).toMatchObject({ ok: true, choice: { targetBranch: 'main', finish: 'pr' } })
 })
 
-test('main und Mergen: Warnung mit dem Integration-Branch, dann Ja/Nein mit Vorauswahl Nein', async () => {
-  const { klon, pfad } = bereit()
+test('main and merge: warning with the integration branch, then Yes/No preselecting No', async () => {
+  const { clone, path } = ready()
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['main', 'mergen', true])
+  const { result, shown } = await run({ clone, path }, ['main', 'merge', true])
 
-  expect(gezeigt.slice(3)).toEqual([
+  expect(shown.slice(3)).toEqual([
     {
-      art: 'warn',
-      text: 'Sind am Ende alle Tickets geschlossen, mergt groundhog spec/25 nach main und pusht, ohne nachzufragen.',
+      kind: 'warn',
+      text: 'If all tickets are closed at the end, groundhog merges spec/25 into main and pushes, without asking.',
     },
     {
-      art: 'confirm',
-      message: 'Ohne weitere Rückfrage nach main mergen?',
+      kind: 'confirm',
+      message: 'Merge into main without asking again?',
       initialValue: false,
-      active: 'Ja',
-      inactive: 'Nein',
+      active: 'Yes',
+      inactive: 'No',
     },
-    { art: 'outro', text: 'Ab hier ist keine Eingabe mehr nötig.' },
+    { kind: 'outro', text: 'No more input needed from here on.' },
   ])
-  expect(ergebnis).toMatchObject({ ok: true, auswahl: { zielBranch: 'main', abschluss: 'mergen' } })
+  expect(result).toMatchObject({ ok: true, choice: { targetBranch: 'main', finish: 'merge' } })
 })
 
-test('Nein zum Mergen nach main bricht ab, ohne etwas zu verändern', async () => {
-  const { klon, fake, pfad } = bereit()
-  const vorher = git(klon, 'for-each-ref')
+test('No to merging into main aborts without changing anything', async () => {
+  const { clone, fake, path } = ready()
+  const before = git(clone, 'for-each-ref')
 
-  const { ergebnis } = await start({ klon, pfad }, ['main', 'mergen', false])
+  const { result } = await run({ clone, path }, ['main', 'merge', false])
 
-  expect(ergebnis).toEqual({
+  expect(result).toEqual({
     ok: false,
     exitCode: 1,
-    meldung: 'Abgebrochen. Nichts wurde verändert.',
+    message: 'Aborted. Nothing was changed.',
   })
-  expect(existsSync(sperre(klon))).toBe(false)
-  expect(git(klon, 'for-each-ref')).toBe(vorher)
-  expect(git(klon, 'status', '--porcelain')).toBe('')
-  expect(fake.aufrufe().every((a) => ['--version', 'auth', 'api'].includes(a.args[0] ?? ''))).toBe(
+  expect(existsSync(lock(clone))).toBe(false)
+  expect(git(clone, 'for-each-ref')).toBe(before)
+  expect(git(clone, 'status', '--porcelain')).toBe('')
+  expect(fake.calls().every((a) => ['--version', 'auth', 'api'].includes(a.args[0] ?? ''))).toBe(
     true,
   )
 })
 
-test('Strg+C im Menü bricht mit Exit-Code 130 ab und gibt die Sperre frei', async () => {
-  const { klon, pfad } = bereit()
+test('Ctrl+C in the menu aborts with exit code 130 and releases the lock', async () => {
+  const { clone, path } = ready()
 
-  const { ergebnis } = await start({ klon, pfad }, ['main', ABBRUCH])
+  const { result } = await run({ clone, path }, ['main', CANCEL])
 
-  expect(ergebnis).toEqual({
+  expect(result).toEqual({
     ok: false,
     exitCode: 130,
-    meldung: 'Abgebrochen. Nichts wurde verändert.',
+    message: 'Aborted. Nothing was changed.',
   })
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('bei abgeschalteter Sandbox warnt das Menü, und der Lauf bekommt keine Sandbox', async () => {
-  const { klon, pfad } = bereit({ konfiguration: { ...KONFIGURATION, sandbox: { off: true } } })
-  const sandboxFehlt = vi.fn(() => ['nie gefragt'])
+test('with the sandbox switched off the menu warns, and the run gets no sandbox', async () => {
+  const { clone, path } = ready({ config: { ...CONFIG, sandbox: { off: true } } })
+  const sandboxMissing = vi.fn(() => ['never asked'])
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['develop', 'pr'], { sandboxFehlt })
+  const { result, shown } = await run({ clone, path }, ['develop', 'pr'], { sandboxMissing })
 
-  expect(gezeigt[0]).toMatchObject({ text: expect.stringContaining('Sandbox: aus') })
-  expect(gezeigt[1]).toEqual({
-    art: 'warn',
-    text: 'Die Sandbox ist aus: Runs laufen im Auto-Mode ohne Grenzen auf diesem Rechner, mit deinem gh-Token.',
+  expect(shown[0]).toMatchObject({ text: expect.stringContaining('Sandbox: off') })
+  expect(shown[1]).toEqual({
+    kind: 'warn',
+    text: 'The sandbox is off: sessions run in auto mode without boundaries on this machine, with your gh token.',
   })
-  expect(sandboxFehlt).not.toHaveBeenCalled()
-  expect(ergebnis).toMatchObject({ ok: true, sandbox: undefined })
+  expect(sandboxMissing).not.toHaveBeenCalled()
+  expect(result).toMatchObject({ ok: true, sandbox: undefined })
 })
 
-const UPDATE_FRAGE = {
-  art: 'confirm',
-  message: 'groundhog v0.2.0 ist erschienen. Jetzt aktualisieren?',
+const UPDATE_QUESTION = {
+  kind: 'confirm',
+  message: 'groundhog v0.2.0 is out. Update now?',
   initialValue: false,
-  active: 'Ja',
-  inactive: 'Nein',
+  active: 'Yes',
+  inactive: 'No',
 }
 
-test('gibt es eine neuere Version, fragt das Menü zuerst nach dem Update; Nein startet den Lauf', async () => {
-  const { klon, pfad } = bereit()
-  const installiere = vi.fn()
+test('if there is a newer version, the menu asks about the update first; No starts the run', async () => {
+  const { clone, path } = ready()
+  const install = vi.fn()
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [false, 'main', 'pr'], {
-    update: { neuereVersion: () => 'v0.2.0', installiere },
+  const { result, shown } = await run({ clone, path }, [false, 'main', 'pr'], {
+    update: { newerVersion: () => 'v0.2.0', install },
   })
 
-  expect(gezeigt[0]).toEqual(UPDATE_FRAGE)
-  expect(gezeigt[1]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
-  expect(installiere).not.toHaveBeenCalled()
-  expect(ergebnis).toMatchObject({ ok: true, auswahl: { zielBranch: 'main', abschluss: 'pr' } })
+  expect(shown[0]).toEqual(UPDATE_QUESTION)
+  expect(shown[1]).toMatchObject({ kind: 'note', title: 'This run' })
+  expect(install).not.toHaveBeenCalled()
+  expect(result).toMatchObject({ ok: true, choice: { targetBranch: 'main', finish: 'pr' } })
 })
 
-test('Ja zum Update installiert den Tag, beendet den Start und bittet um einen neuen Start', async () => {
-  const { klon, pfad } = bereit()
-  const installiere = vi.fn()
+test('Yes to the update installs the tag, ends the start and asks for a new start', async () => {
+  const { clone, path } = ready()
+  const install = vi.fn()
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true], {
-    update: { neuereVersion: () => 'v0.2.0', installiere },
+  const { result, shown } = await run({ clone, path }, [true], {
+    update: { newerVersion: () => 'v0.2.0', install },
   })
 
-  expect(gezeigt).toEqual([UPDATE_FRAGE])
-  expect(installiere).toHaveBeenCalledWith('v0.2.0')
-  expect(ergebnis).toEqual({
+  expect(shown).toEqual([UPDATE_QUESTION])
+  expect(install).toHaveBeenCalledWith('v0.2.0')
+  expect(result).toEqual({
     ok: false,
     exitCode: 0,
-    meldung: 'groundhog v0.2.0 ist installiert. Starte neu: groundhog 25',
+    message: 'groundhog v0.2.0 is installed. Start again: groundhog 25',
   })
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('scheitert das Update, bricht der Start mit der Meldung ab', async () => {
-  const { klon, pfad } = bereit()
+test('if the update fails, the start aborts with the message', async () => {
+  const { clone, path } = ready()
 
-  const { ergebnis } = await start({ klon, pfad }, [true], {
+  const { result } = await run({ clone, path }, [true], {
     update: {
-      neuereVersion: () => 'v0.2.0',
-      installiere: () => {
-        throw new Error('Das Update auf v0.2.0 ist gescheitert.')
+      newerVersion: () => 'v0.2.0',
+      install: () => {
+        throw new Error('The update to v0.2.0 failed.')
       },
     },
   })
 
-  expect(ergebnis).toEqual({
+  expect(result).toEqual({
     ok: false,
     exitCode: 1,
-    meldung: 'Das Update auf v0.2.0 ist gescheitert.',
+    message: 'The update to v0.2.0 failed.',
   })
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('ohne neuere Version fragt das Menü nicht nach dem Update', async () => {
-  const { klon, pfad } = bereit()
+test('without a newer version the menu does not ask about the update', async () => {
+  const { clone, path } = ready()
 
-  const { gezeigt } = await start({ klon, pfad }, ['main', 'pr'], {
-    update: { neuereVersion: () => undefined, installiere: vi.fn() },
+  const { shown } = await run({ clone, path }, ['main', 'pr'], {
+    update: { newerVersion: () => undefined, install: vi.fn() },
   })
 
-  expect(gezeigt[0]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
+  expect(shown[0]).toMatchObject({ kind: 'note', title: 'This run' })
 })
 
-/** Rest eines abgebrochenen Laufs: `HEAD` auf ticket/7, auf Wunsch mit schmutzigem Arbeitsverzeichnis. */
-function ticketRest(klon: string, schmutzig: boolean) {
-  git(klon, 'checkout', '-q', '-b', 'ticket/7')
-  commitDatei(klon, 'halb.txt', 'x', 'halb fertig')
-  if (schmutzig) {
-    writeFileSync(join(klon, 'halb.txt'), 'y')
-    writeFileSync(join(klon, 'neu.txt'), 'x')
+/** Remnant of an aborted run: `HEAD` on ticket/7, optionally with a dirty working tree. */
+function ticketRemnant(clone: string, dirty: boolean) {
+  git(clone, 'checkout', '-q', '-b', 'ticket/7')
+  commitFile(clone, 'half.txt', 'x', 'half done')
+  if (dirty) {
+    writeFileSync(join(clone, 'half.txt'), 'y')
+    writeFileSync(join(clone, 'new.txt'), 'x')
   }
 }
 
-test('schmutziger ticket/*-Rest: Ja zu „Rest von Ticket n verwerfen?“ räumt auf, dann folgt das Menü', async () => {
-  const { klon, pfad } = bereit()
-  ticketRest(klon, true)
+test('dirty ticket/* remnant: Yes to "Discard the remnant of ticket n?" cleans up, then the menu follows', async () => {
+  const { clone, path } = ready()
+  ticketRemnant(clone, true)
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true, 'main', 'pr'])
+  const { result, shown } = await run({ clone, path }, [true, 'main', 'pr'])
 
-  expect(ergebnis.ok).toBe(true)
-  expect(gezeigt[0]).toEqual({
-    art: 'confirm',
-    message: 'Rest von Ticket 7 verwerfen?',
+  expect(result.ok).toBe(true)
+  expect(shown[0]).toEqual({
+    kind: 'confirm',
+    message: 'Discard the remnant of ticket 7?',
     initialValue: false,
-    active: 'Ja',
-    inactive: 'Nein',
+    active: 'Yes',
+    inactive: 'No',
   })
-  expect(gezeigt[1]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
-  expect(git(klon, 'status', '--porcelain')).toBe('')
+  expect(shown[1]).toMatchObject({ kind: 'note', title: 'This run' })
+  expect(git(clone, 'status', '--porcelain')).toBe('')
 })
 
-test('schmutziger ticket/*-Rest: Nein bricht ab, ohne etwas zu verändern', async () => {
-  const { klon, pfad } = bereit()
-  ticketRest(klon, true)
-  const status = git(klon, 'status', '--porcelain')
+test('dirty ticket/* remnant: No aborts without changing anything', async () => {
+  const { clone, path } = ready()
+  ticketRemnant(clone, true)
+  const status = git(clone, 'status', '--porcelain')
 
-  const { ergebnis } = await start({ klon, pfad }, [false])
+  const { result } = await run({ clone, path }, [false])
 
-  expect(ergebnis).toMatchObject({ ok: false, exitCode: 1 })
-  expect(git(klon, 'status', '--porcelain')).toBe(status)
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(result).toMatchObject({ ok: false, exitCode: 1 })
+  expect(git(clone, 'status', '--porcelain')).toBe(status)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('sauberer ticket/*-Rest: der Lauf startet ohne Frage', async () => {
-  const { klon, pfad } = bereit()
-  ticketRest(klon, false)
+test('clean ticket/* remnant: the run starts without asking', async () => {
+  const { clone, path } = ready()
+  ticketRemnant(clone, false)
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, ['main', 'pr'])
+  const { result, shown } = await run({ clone, path }, ['main', 'pr'])
 
-  expect(ergebnis.ok).toBe(true)
-  expect(gezeigt[0]).toMatchObject({ art: 'note', titel: 'Dieser Lauf' })
+  expect(result.ok).toBe(true)
+  expect(shown[0]).toMatchObject({ kind: 'note', title: 'This run' })
 })
 
-test('Integration- und Ticket-Branches eines früheren Laufs auf dem Remote stören den Start nicht', async () => {
-  const { klon, pfad } = bereit()
-  git(klon, 'push', '-q', 'origin', 'main:spec/25', 'main:ticket/7')
+test('integration and ticket branches of an earlier run on the remote do not get in the way of the start', async () => {
+  const { clone, path } = ready()
+  git(clone, 'push', '-q', 'origin', 'main:spec/25', 'main:ticket/7')
 
-  const { ergebnis } = await start({ klon, pfad }, ['main', 'pr'])
+  const { result } = await run({ clone, path }, ['main', 'pr'])
 
-  expect(ergebnis.ok).toBe(true)
+  expect(result.ok).toBe(true)
 })
 
-const ohneSubIssues: GhAntwort = {
-  ausgabe: JSON.stringify({
+const withoutSubIssues: GhAnswer = {
+  output: JSON.stringify({
     data: {
       repository: {
         url: 'https://github.com/lucas-devries/groundhog',
@@ -419,133 +419,141 @@ const ohneSubIssues: GhAntwort = {
   }),
 }
 
-interface Fall {
-  grund: string
-  bereit?: Parameters<typeof bereit>[0]
-  vorbereiten?: (klon: string) => void
-  /** Startet in einem leeren Temp-Verzeichnis statt im Klon. */
-  ausserhalb?: boolean
-  optionen?: { istTerminal?: boolean; sandboxFehlt?: () => string[] }
-  meldung: string[]
+interface Case {
+  reason: string
+  ready?: Parameters<typeof ready>[0]
+  prepare?: (clone: string) => void
+  /** Starts in an empty temp directory instead of the clone. */
+  outside?: boolean
+  options?: { isTerminal?: boolean; sandboxMissing?: () => string[] }
+  message: string[]
 }
 
-const FAELLE: Fall[] = [
-  { grund: 'git fehlt', bereit: { ohne: ['git'] }, meldung: ['git fehlt im PATH'] },
-  { grund: 'gh fehlt', bereit: { ohne: ['gh'] }, meldung: ['gh fehlt im PATH'] },
+const CASES: Case[] = [
   {
-    grund: 'das Verzeichnis in keinem Git-Repo liegt',
-    ausserhalb: true,
-    meldung: ['groundhog muss in einem Git-Repo laufen.'],
+    reason: 'git is missing',
+    ready: { without: ['git'] },
+    message: ['git is missing in the PATH'],
+  },
+  { reason: 'gh is missing', ready: { without: ['gh'] }, message: ['gh is missing in the PATH'] },
+  {
+    reason: 'the directory is in no Git repo',
+    outside: true,
+    message: ['groundhog must run in a Git repo.'],
   },
   {
-    grund: 'gh ist zu alt',
-    bereit: { gh: [{ ausgabe: 'gh version 2.93.9 (2026-01-01)\n' }] },
-    meldung: ['gh ist zu alt (gh version 2.93.9 (2026-01-01))', '2.94'],
+    reason: 'gh is too old',
+    ready: { gh: [{ output: 'gh version 2.93.9 (2026-01-01)\n' }] },
+    message: ['gh is too old (gh version 2.93.9 (2026-01-01))', '2.94'],
   },
   {
-    grund: 'gh ist nicht angemeldet',
-    bereit: { gh: [GH_VERSION, { exitCode: 1, fehler: 'no oauth token found' }] },
-    meldung: ['gh ist nicht angemeldet', 'gh auth login'],
-  },
-  { grund: 'claude fehlt', bereit: { claude: null }, meldung: ['claude fehlt im PATH'] },
-  {
-    grund: 'claude nicht angemeldet ist',
-    bereit: { claude: [CLAUDE_VERSION, { exitCode: 1 }] },
-    meldung: ['claude ist nicht angemeldet', 'claude auth login'],
+    reason: 'gh is not logged in',
+    ready: { gh: [GH_VERSION, { exitCode: 1, error: 'no oauth token found' }] },
+    message: ['gh is not logged in', 'gh auth login'],
   },
   {
-    grund: 'die Projekt-Konfiguration fehlt',
-    bereit: { konfiguration: null },
-    meldung: ['groundhog.json fehlt', 'groundhog init'],
+    reason: 'claude is missing',
+    ready: { claude: null },
+    message: ['claude is missing in the PATH'],
   },
   {
-    grund: 'die Projekt-Konfiguration ist ungültig',
-    bereit: { konfiguration: { checks: [], targetBranches: ['main'], extra: 1 } },
-    meldung: ['checks: mindestens ein Eintrag nötig', 'unbekannter Schlüssel: extra'],
+    reason: 'claude is not logged in',
+    ready: { claude: [CLAUDE_VERSION, { exitCode: 1 }] },
+    message: ['claude is not logged in', 'claude auth login'],
   },
   {
-    grund: 'ein anderer Lauf die Sperre hält',
-    vorbereiten: (klon) =>
-      writeFileSync(sperre(klon), JSON.stringify({ pid: process.ppid, start: 1, spec: 7 })),
-    meldung: [`läuft schon ein Lauf an Spec #7 (PID ${process.ppid})`],
+    reason: 'the project config is missing',
+    ready: { config: null },
+    message: ['groundhog.json is missing', 'groundhog init'],
   },
   {
-    grund: 'das Arbeitsverzeichnis schmutzig ist',
-    vorbereiten: (klon) => writeFileSync(join(klon, 'neu.txt'), 'x'),
-    meldung: ['Arbeitsverzeichnis ist nicht sauber'],
+    reason: 'the project config is invalid',
+    ready: { config: { checks: [], targetBranches: ['main'], extra: 1 } },
+    message: ['checks: at least one entry required', 'unknown key: extra'],
   },
   {
-    grund: 'ein Branch spec auf dem Remote liegt',
-    vorbereiten: (klon) => git(klon, 'push', '-q', 'origin', 'main:spec'),
-    meldung: ['Branch origin/spec'],
+    reason: 'another run holds the lock',
+    prepare: (clone) =>
+      writeFileSync(lock(clone), JSON.stringify({ pid: process.ppid, start: 1, spec: 7 })),
+    message: [`A run on spec #7 is already in progress in this clone (PID ${process.ppid})`],
   },
   {
-    grund: 'ein Branch ticket lokal liegt',
-    vorbereiten: (klon) => git(klon, 'branch', 'ticket'),
-    meldung: ['Branch ticket'],
+    reason: 'the working tree is dirty',
+    prepare: (clone) => writeFileSync(join(clone, 'new.txt'), 'x'),
+    message: ['working tree is not clean'],
   },
   {
-    grund: 'ein Ziel-Branch auf dem Remote fehlt',
-    bereit: { konfiguration: { ...KONFIGURATION, targetBranches: ['main', 'release'] } },
-    meldung: ['Ziel-Branch fehlt auf dem Remote: release'],
+    reason: 'a branch spec lies on the remote',
+    prepare: (clone) => git(clone, 'push', '-q', 'origin', 'main:spec'),
+    message: ['branch origin/spec'],
   },
   {
-    grund: 'ein Label fehlt',
-    bereit: {
+    reason: 'a branch ticket lies locally',
+    prepare: (clone) => git(clone, 'branch', 'ticket'),
+    message: ['branch ticket'],
+  },
+  {
+    reason: 'a target branch is missing on the remote',
+    ready: { config: { ...CONFIG, targetBranches: ['main', 'release'] } },
+    message: ['Target branch missing on the remote: release'],
+  },
+  {
+    reason: 'a label is missing',
+    ready: {
       gh: [
         GH_VERSION,
         TOKEN,
-        NUTZER,
-        aufnahme('start-check-without-sub-issues-and-human-label.json'),
+        USER,
+        recording('start-check-without-sub-issues-and-human-label.json'),
       ],
     },
-    meldung: ['fehlt das Label ready-for-human'],
+    message: ['missing the label ready-for-human'],
   },
   {
-    grund: 'die Spec keine Sub-Issues hat',
-    bereit: { gh: [GH_VERSION, TOKEN, NUTZER, ohneSubIssues] },
-    meldung: ['Spec #25 hat keine Sub-Issues', 'Sub-issues'],
+    reason: 'the spec has no sub-issues',
+    ready: { gh: [GH_VERSION, TOKEN, USER, withoutSubIssues] },
+    message: ['Spec #25 has no sub-issues', 'Sub-issues'],
   },
   {
-    grund: 'es die Spec nicht gibt',
-    bereit: {
-      gh: [GH_VERSION, TOKEN, NUTZER, { exitCode: 1, fehler: 'Could not resolve to an Issue' }],
+    reason: 'the spec does not exist',
+    ready: {
+      gh: [GH_VERSION, TOKEN, USER, { exitCode: 1, error: 'Could not resolve to an Issue' }],
     },
-    meldung: ['Could not resolve to an Issue'],
+    message: ['Could not resolve to an Issue'],
   },
   {
-    grund: 'die Sandbox an, aber nicht startbar ist',
-    optionen: { sandboxFehlt: () => ['bwrap not installed', 'Start als root'] },
-    meldung: ['Sandbox ist an, startet aber nicht', '- bwrap not installed\n- Start als root'],
+    reason: 'the sandbox is on but cannot start',
+    options: { sandboxMissing: () => ['bwrap not installed', 'Started as root'] },
+    message: ['sandbox is on but does not start', '- bwrap not installed\n- Started as root'],
   },
   {
-    grund: 'stdin kein Terminal ist',
-    optionen: { istTerminal: false },
-    meldung: ['Terminal an stdin'],
+    reason: 'stdin is not a terminal',
+    options: { isTerminal: false },
+    message: ['terminal on stdin'],
   },
 ]
 
-test.each(FAELLE)('der Start bricht vor dem Menü ab, wenn $grund', async (fall) => {
-  const { klon, fake, pfad } = bereit(fall.bereit)
-  fall.vorbereiten?.(klon)
-  const refs = git(klon, 'for-each-ref')
-  const status = git(klon, 'status', '--porcelain')
+test.each(CASES)('the start aborts before the menu if $reason', async (c) => {
+  const { clone, fake, path } = ready(c.ready)
+  c.prepare?.(clone)
+  const refs = git(clone, 'for-each-ref')
+  const status = git(clone, 'status', '--porcelain')
 
-  const ort = fall.ausserhalb ? mkdtempSync(join(tmpdir(), 'kein-repo-')) : klon
-  const { ergebnis, gezeigt } = await start({ klon: ort, pfad }, [], fall.optionen)
+  const where = c.outside ? mkdtempSync(join(tmpdir(), 'no-repo-')) : clone
+  const { result, shown } = await run({ clone: where, path }, [], c.options)
 
-  if (ergebnis.ok) throw new Error('Start ist nicht abgebrochen')
-  expect(ergebnis.exitCode).toBe(1)
-  for (const teil of fall.meldung) expect(ergebnis.meldung).toContain(teil)
-  expect(gezeigt).toEqual([])
-  // Nichts verändert: Branches, Arbeitsverzeichnis, Tracker; keine eigene Sperre bleibt.
-  expect(git(klon, 'for-each-ref')).toBe(refs)
-  expect(git(klon, 'status', '--porcelain')).toBe(status)
-  expect(fake.aufrufe().every((a) => ['--version', 'auth', 'api'].includes(a.args[0] ?? ''))).toBe(
+  if (result.ok) throw new Error('Start did not abort')
+  expect(result.exitCode).toBe(1)
+  for (const part of c.message) expect(result.message).toContain(part)
+  expect(shown).toEqual([])
+  // Nothing changed: branches, working tree, tracker; no own lock remains.
+  expect(git(clone, 'for-each-ref')).toBe(refs)
+  expect(git(clone, 'status', '--porcelain')).toBe(status)
+  expect(fake.calls().every((a) => ['--version', 'auth', 'api'].includes(a.args[0] ?? ''))).toBe(
     true,
   )
-  if (existsSync(sperre(klon))) {
-    expect(JSON.parse(readFileSync(sperre(klon), 'utf8')).pid).not.toBe(process.pid)
+  if (existsSync(lock(clone))) {
+    expect(JSON.parse(readFileSync(lock(clone), 'utf8')).pid).not.toBe(process.pid)
   }
 })
 
@@ -553,45 +561,45 @@ const INSTALLATION =
   'claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock'
 const USAGE = ['-p', '/usage', '--output-format', 'stream-json', '--verbose']
 
-test('fehlen die Skills, fragt das Menü nach der Installation; Nein bricht mit dem Befehl ab', async () => {
-  const { klon, claude, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
+test('if the skills are missing, the menu asks about the installation; No aborts with the command', async () => {
+  const { clone, claude, path } = ready({ claude: [CLAUDE_VERSION, LOGGED_IN, WITHOUT_SKILLS] })
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [false])
+  const { result, shown } = await run({ clone, path }, [false])
 
-  expect(gezeigt).toEqual([
+  expect(shown).toEqual([
     {
-      art: 'confirm',
+      kind: 'confirm',
       message:
-        'Es fehlen die Skills mattpocock-skills:implement, mattpocock-skills:tdd, mattpocock-skills:code-review. Das Plugin jetzt installieren?',
+        'The skills mattpocock-skills:implement, mattpocock-skills:tdd, mattpocock-skills:code-review are missing. Install the plugin now?',
       initialValue: true,
-      active: 'Ja',
-      inactive: 'Nein',
+      active: 'Yes',
+      inactive: 'No',
     },
   ])
-  if (ergebnis.ok) throw new Error('Start ist nicht abgebrochen')
-  expect(ergebnis.exitCode).toBe(1)
-  expect(ergebnis.meldung).toContain(INSTALLATION)
-  expect(existsSync(sperre(klon))).toBe(false)
-  expect(claude?.aufrufe().map((a) => a.args)).toEqual([['--version'], ['auth', 'status'], USAGE])
+  if (result.ok) throw new Error('Start did not abort')
+  expect(result.exitCode).toBe(1)
+  expect(result.message).toContain(INSTALLATION)
+  expect(existsSync(lock(clone))).toBe(false)
+  expect(claude?.calls().map((a) => a.args)).toEqual([['--version'], ['auth', 'status'], USAGE])
 })
 
-test('ohne Terminal und ohne Skills bricht der Start mit dem Installationsbefehl ab', async () => {
-  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
+test('without a terminal and without skills the start aborts with the installation command', async () => {
+  const { clone, path } = ready({ claude: [CLAUDE_VERSION, LOGGED_IN, WITHOUT_SKILLS] })
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [], { istTerminal: false })
+  const { result, shown } = await run({ clone, path }, [], { isTerminal: false })
 
-  expect(gezeigt).toEqual([])
-  expect(ergebnis).toMatchObject({ ok: false, meldung: expect.stringContaining(INSTALLATION) })
+  expect(shown).toEqual([])
+  expect(result).toMatchObject({ ok: false, message: expect.stringContaining(INSTALLATION) })
 })
 
-test('nach der Installation prüft groundhog die Skills erneut und startet', async () => {
-  const { klon, claude, pfad } = bereit({
-    claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS, {}, {}, MIT_SKILLS],
+test('after the installation groundhog checks the skills again and starts', async () => {
+  const { clone, claude, path } = ready({
+    claude: [CLAUDE_VERSION, LOGGED_IN, WITHOUT_SKILLS, {}, {}, WITH_SKILLS],
   })
 
-  const { ergebnis } = await start({ klon, pfad }, [true, 'develop', 'pr'])
+  const { result } = await run({ clone, path }, [true, 'develop', 'pr'])
 
-  expect(claude?.aufrufe().map((a) => a.args)).toEqual([
+  expect(claude?.calls().map((a) => a.args)).toEqual([
     ['--version'],
     ['auth', 'status'],
     USAGE,
@@ -599,28 +607,28 @@ test('nach der Installation prüft groundhog die Skills erneut und startet', asy
     ['plugin', 'install', 'mattpocock-skills@mattpocock'],
     USAGE,
   ])
-  expect(ergebnis).toMatchObject({ ok: true, versionen: { 'mattpocock-skills': '1.3.2' } })
+  expect(result).toMatchObject({ ok: true, versions: { 'mattpocock-skills': '1.3.2' } })
 })
 
-test('fehlen die Skills nach der Installation weiter, bricht groundhog ab', async () => {
-  const { klon, pfad } = bereit({
-    claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS, {}, { exitCode: 1 }, OHNE_SKILLS],
+test('if the skills are still missing after the installation, groundhog aborts', async () => {
+  const { clone, path } = ready({
+    claude: [CLAUDE_VERSION, LOGGED_IN, WITHOUT_SKILLS, {}, { exitCode: 1 }, WITHOUT_SKILLS],
   })
 
-  const { ergebnis, gezeigt } = await start({ klon, pfad }, [true])
+  const { result, shown } = await run({ clone, path }, [true])
 
-  expect(gezeigt).toHaveLength(1)
-  if (ergebnis.ok) throw new Error('Start ist nicht abgebrochen')
-  expect(ergebnis.exitCode).toBe(1)
-  expect(ergebnis.meldung).toContain('auch nach der Installation')
-  expect(ergebnis.meldung).toContain(INSTALLATION)
-  expect(existsSync(sperre(klon))).toBe(false)
+  expect(shown).toHaveLength(1)
+  if (result.ok) throw new Error('Start did not abort')
+  expect(result.exitCode).toBe(1)
+  expect(result.message).toContain('after the installation')
+  expect(result.message).toContain(INSTALLATION)
+  expect(existsSync(lock(clone))).toBe(false)
 })
 
-test('Strg+C bei der Frage nach der Installation bricht mit 130 ab', async () => {
-  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
+test('Ctrl+C at the question about the installation aborts with 130', async () => {
+  const { clone, path } = ready({ claude: [CLAUDE_VERSION, LOGGED_IN, WITHOUT_SKILLS] })
 
-  const { ergebnis } = await start({ klon, pfad }, [ABBRUCH])
+  const { result } = await run({ clone, path }, [CANCEL])
 
-  expect(ergebnis).toMatchObject({ ok: false, exitCode: 130 })
+  expect(result).toMatchObject({ ok: false, exitCode: 130 })
 })

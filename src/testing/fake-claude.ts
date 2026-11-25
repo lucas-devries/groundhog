@@ -2,73 +2,73 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** Was das Fake-`claude` bei einem Aufruf tut. */
-export interface ClaudeAntwort {
-  /** Datei aus `aufnahmen/`, deren Zeilen auf stdout gehen. */
-  aufnahme?: string
+/** What the fake `claude` does on a call. */
+export interface ClaudeAnswer {
+  /** File from `recordings/` whose lines go to stdout. */
+  recording?: string
   exitCode?: number
-  /** Startet ein Kind (`sleep`) und endet nie; die PID des Kinds steht im Aufruf. */
-  haengt?: boolean
+  /** Starts a child (`sleep`) and never ends; the child's PID is in the call. */
+  hangs?: boolean
 }
 
-export interface ClaudeAufruf {
+export interface ClaudeCall {
   args: string[]
   cwd: string
-  /** Wohin stdin zeigt (Linux: Ziel von `/proc/self/fd/0`). */
+  /** Where stdin points to (Linux: target of `/proc/self/fd/0`). */
   stdin: string
   env: Record<string, string | undefined>
-  kind?: number
+  child?: number
 }
 
-// Läuft als CommonJS, weil im Temp-Verzeichnis kein package.json mit "type": "module" liegt.
-const SKRIPT = `#!/usr/bin/env node
+// Runs as CommonJS, because the temp directory has no package.json with "type": "module".
+const SCRIPT = `#!/usr/bin/env node
 const fs = require('node:fs')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
-const log = path.join(__dirname, 'aufrufe.jsonl')
+const log = path.join(__dirname, 'calls.jsonl')
 const n = fs.readFileSync(log, 'utf8').split('\\n').filter(Boolean).length
-const antwort = JSON.parse(fs.readFileSync(path.join(__dirname, 'antworten.json'), 'utf8'))[n]
+const answer = JSON.parse(fs.readFileSync(path.join(__dirname, 'answers.json'), 'utf8'))[n]
 let stdin = '?'
 try { stdin = fs.readlinkSync('/proc/self/fd/0') } catch {}
 const env = {}
 for (const k of ['GH_TOKEN', 'IN_FAKE_SRT', 'ANTHROPIC_LOG', 'CLAUDE_CODE_RETRY_WATCHDOG', 'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS']) env[k] = process.env[k]
-const aufruf = { args: process.argv.slice(2), cwd: process.cwd(), stdin, env }
-if (!antwort) {
-  fs.appendFileSync(log, JSON.stringify(aufruf) + '\\n')
-  process.stderr.write('fake claude: keine Antwort für Aufruf ' + (n + 1))
+const call = { args: process.argv.slice(2), cwd: process.cwd(), stdin, env }
+if (!answer) {
+  fs.appendFileSync(log, JSON.stringify(call) + '\\n')
+  process.stderr.write('fake claude: no answer for call ' + (n + 1))
   process.exit(99)
 }
-if (antwort.haengt) {
-  aufruf.kind = spawn('sleep', ['1000'], { stdio: 'ignore' }).pid
-  fs.appendFileSync(log, JSON.stringify(aufruf) + '\\n')
+if (answer.hangs) {
+  call.child = spawn('sleep', ['1000'], { stdio: 'ignore' }).pid
+  fs.appendFileSync(log, JSON.stringify(call) + '\\n')
   setInterval(() => {}, 1000)
 } else {
-  fs.appendFileSync(log, JSON.stringify(aufruf) + '\\n')
-  if (antwort.aufnahme) process.stdout.write(fs.readFileSync(antwort.aufnahme))
-  process.stdout.write('', () => process.exit(antwort.exitCode ?? 0))
+  fs.appendFileSync(log, JSON.stringify(call) + '\\n')
+  if (answer.recording) process.stdout.write(fs.readFileSync(answer.recording))
+  process.stdout.write('', () => process.exit(answer.exitCode ?? 0))
 }
 `
 
 /**
- * Ein `claude`, das aufgezeichnete `stream-json`-Ausgaben der Reihe nach abspielt und jeden
- * Aufruf festhält. `verzeichnis` gehört vorn in den `PATH`.
+ * A `claude` that plays recorded `stream-json` outputs in order and records every call.
+ * `directory` belongs at the front of `PATH`.
  */
-export function fakeClaude(antworten: ClaudeAntwort[]) {
-  const verzeichnis = mkdtempSync(join(tmpdir(), 'fake-claude-'))
-  const mitPfad = antworten.map((a) => ({
+export function fakeClaude(answers: ClaudeAnswer[]) {
+  const directory = mkdtempSync(join(tmpdir(), 'fake-claude-'))
+  const withPath = answers.map((a) => ({
     ...a,
-    aufnahme: a.aufnahme && join(import.meta.dirname, 'recordings', a.aufnahme),
+    recording: a.recording && join(import.meta.dirname, 'recordings', a.recording),
   }))
-  writeFileSync(join(verzeichnis, 'antworten.json'), JSON.stringify(mitPfad))
-  writeFileSync(join(verzeichnis, 'aufrufe.jsonl'), '')
-  writeFileSync(join(verzeichnis, 'claude'), SKRIPT)
-  chmodSync(join(verzeichnis, 'claude'), 0o755)
+  writeFileSync(join(directory, 'answers.json'), JSON.stringify(withPath))
+  writeFileSync(join(directory, 'calls.jsonl'), '')
+  writeFileSync(join(directory, 'claude'), SCRIPT)
+  chmodSync(join(directory, 'claude'), 0o755)
   return {
-    verzeichnis,
-    aufrufe: (): ClaudeAufruf[] =>
-      readFileSync(join(verzeichnis, 'aufrufe.jsonl'), 'utf8')
+    directory,
+    calls: (): ClaudeCall[] =>
+      readFileSync(join(directory, 'calls.jsonl'), 'utf8')
         .split('\n')
         .filter(Boolean)
-        .map((zeile) => JSON.parse(zeile)),
+        .map((line) => JSON.parse(line)),
   }
 }

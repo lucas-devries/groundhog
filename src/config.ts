@@ -1,87 +1,87 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Versuche pro Ticket, wenn die Projekt-Konfiguration nichts anderes sagt. */
-export const VERSUCHE_STANDARD = 3
+/** Attempts per ticket, unless the project config says otherwise. */
+export const DEFAULT_ATTEMPTS = 3
 
-/** Die Projekt-Konfiguration, `groundhog.json` im Repo-Root. */
-export interface Konfiguration {
+/** The project config, `groundhog.json` in the repo root. */
+export interface Config {
   checks: string[]
   attempts: number
   targetBranches: string[]
   sandbox: { hosts: string[]; off: boolean }
 }
 
-export type Gelesen =
-  | { ok: true; konfiguration: Konfiguration }
-  | { ok: false; fehlt: boolean; fehler: string[] }
+export type ReadConfig =
+  | { ok: true; config: Config }
+  | { ok: false; missing: boolean; errors: string[] }
 
-export const DATEI = 'groundhog.json'
+export const FILE = 'groundhog.json'
 
-/** Liest und prüft die Projekt-Konfiguration; bei einer ungültigen Datei alle Fehler auf einmal. */
-export function leseKonfiguration(verzeichnis: string): Gelesen {
-  const pfad = join(verzeichnis, DATEI)
-  if (!existsSync(pfad)) {
+/** Reads and validates the project config; for an invalid file, all errors at once. */
+export function readConfig(directory: string): ReadConfig {
+  const path = join(directory, FILE)
+  if (!existsSync(path)) {
     return {
       ok: false,
-      fehlt: true,
-      fehler: [`${DATEI} fehlt. Lege sie mit \`groundhog init\` an.`],
+      missing: true,
+      errors: [`${FILE} is missing. Create it with \`groundhog init\`.`],
     }
   }
-  let roh: unknown
+  let raw: unknown
   try {
-    roh = JSON.parse(readFileSync(pfad, 'utf8'))
+    raw = JSON.parse(readFileSync(path, 'utf8'))
   } catch (e) {
     return {
       ok: false,
-      fehlt: false,
-      fehler: [`${DATEI} ist kein gültiges JSON: ${(e as Error).message}`],
+      missing: false,
+      errors: [`${FILE} is not valid JSON: ${(e as Error).message}`],
     }
   }
-  if (!istObjekt(roh)) {
-    return { ok: false, fehlt: false, fehler: [`${DATEI} muss ein JSON-Objekt sein`] }
-  }
-
-  const fehler: string[] = []
-  const liste = (name: string, wert: unknown, pflicht: boolean): string[] => {
-    if (wert === undefined) {
-      if (pflicht) fehler.push(`${name} fehlt`)
-      return []
-    }
-    if (!Array.isArray(wert) || !wert.every((s) => typeof s === 'string')) {
-      fehler.push(`${name}: Liste von Strings erwartet`)
-      return []
-    }
-    if (pflicht && wert.length === 0) fehler.push(`${name}: mindestens ein Eintrag nötig`)
-    return wert
+  if (!isObject(raw)) {
+    return { ok: false, missing: false, errors: [`${FILE} must be a JSON object`] }
   }
 
-  const checks = liste('checks', roh.checks, true)
-  const attempts = roh.attempts ?? VERSUCHE_STANDARD
+  const errors: string[] = []
+  const list = (name: string, value: unknown, required: boolean): string[] => {
+    if (value === undefined) {
+      if (required) errors.push(`${name} is missing`)
+      return []
+    }
+    if (!Array.isArray(value) || !value.every((s) => typeof s === 'string')) {
+      errors.push(`${name}: list of strings expected`)
+      return []
+    }
+    if (required && value.length === 0) errors.push(`${name}: at least one entry required`)
+    return value
+  }
+
+  const checks = list('checks', raw.checks, true)
+  const attempts = raw.attempts ?? DEFAULT_ATTEMPTS
   if (!Number.isInteger(attempts) || (attempts as number) < 1 || (attempts as number) > 10) {
-    fehler.push('attempts: ganze Zahl von 1 bis 10 erwartet')
+    errors.push('attempts: whole number from 1 to 10 expected')
   }
-  const targetBranches = liste('targetBranches', roh.targetBranches, true)
+  const targetBranches = list('targetBranches', raw.targetBranches, true)
   let sandbox: Record<string, unknown> = {}
-  if (roh.sandbox !== undefined) {
-    if (istObjekt(roh.sandbox)) sandbox = roh.sandbox
-    else fehler.push('sandbox: Objekt erwartet')
+  if (raw.sandbox !== undefined) {
+    if (isObject(raw.sandbox)) sandbox = raw.sandbox
+    else errors.push('sandbox: object expected')
   }
-  const hosts = liste('sandbox.hosts', sandbox.hosts, false)
+  const hosts = list('sandbox.hosts', sandbox.hosts, false)
   const off = sandbox.off ?? false
-  if (typeof off !== 'boolean') fehler.push('sandbox.off: true oder false erwartet')
+  if (typeof off !== 'boolean') errors.push('sandbox.off: true or false expected')
 
-  for (const k of unbekannt(roh, ['checks', 'attempts', 'targetBranches', 'sandbox'])) {
-    fehler.push(`unbekannter Schlüssel: ${k}`)
+  for (const k of unknownKeys(raw, ['checks', 'attempts', 'targetBranches', 'sandbox'])) {
+    errors.push(`unknown key: ${k}`)
   }
-  for (const k of unbekannt(sandbox, ['hosts', 'off'])) {
-    fehler.push(`unbekannter Schlüssel: sandbox.${k}`)
+  for (const k of unknownKeys(sandbox, ['hosts', 'off'])) {
+    errors.push(`unknown key: sandbox.${k}`)
   }
 
-  if (fehler.length > 0) return { ok: false, fehlt: false, fehler }
+  if (errors.length > 0) return { ok: false, missing: false, errors }
   return {
     ok: true,
-    konfiguration: {
+    config: {
       checks,
       attempts: attempts as number,
       targetBranches,
@@ -90,10 +90,10 @@ export function leseKonfiguration(verzeichnis: string): Gelesen {
   }
 }
 
-function istObjekt(wert: unknown): wert is Record<string, unknown> {
-  return typeof wert === 'object' && wert !== null && !Array.isArray(wert)
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function unbekannt(objekt: Record<string, unknown>, bekannt: string[]): string[] {
-  return Object.keys(objekt).filter((k) => !bekannt.includes(k))
+function unknownKeys(object: Record<string, unknown>, known: string[]): string[] {
+  return Object.keys(object).filter((k) => !known.includes(k))
 }

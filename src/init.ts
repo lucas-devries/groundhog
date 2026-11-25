@@ -1,161 +1,161 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DATEI, type Konfiguration, leseKonfiguration, VERSUCHE_STANDARD } from './config.ts'
+import { type Config, DEFAULT_ATTEMPTS, FILE, readConfig } from './config.ts'
 import { git } from './git.ts'
-import { FESTE_HOSTS } from './sandbox.ts'
-import type { StrgC } from './start.ts'
+import { FIXED_HOSTS } from './sandbox.ts'
+import type { CtrlC } from './start.ts'
 
-type Pruefung = (wert: string | undefined) => string | undefined
+type Validate = (value: string | undefined) => string | undefined
 
-/** Die Fragen von `init`. Passt zu `@clack/prompts`; ein Symbol als Antwort heißt Strg+C. */
+/** The questions of `init`. Fits `@clack/prompts`; a symbol as answer means Ctrl+C. */
 export interface Dialog {
   multiline(o: {
     message: string
     initialValue: string
-    validate: Pruefung
-  }): Promise<string | StrgC>
-  text(o: { message: string; initialValue: string; validate?: Pruefung }): Promise<string | StrgC>
+    validate: Validate
+  }): Promise<string | CtrlC>
+  text(o: { message: string; initialValue: string; validate?: Validate }): Promise<string | CtrlC>
   multiselect(o: {
     message: string
     options: { value: string; label: string }[]
     initialValues: string[]
     required: true
-  }): Promise<string[] | StrgC>
+  }): Promise<string[] | CtrlC>
   confirm(o: {
     message: string
     initialValue: boolean
     active: string
     inactive: string
-  }): Promise<boolean | StrgC>
+  }): Promise<boolean | CtrlC>
   info(text: string): void
 }
 
-export interface InitOptionen {
-  verzeichnis: string
+export interface InitOptions {
+  directory: string
   dialog: Dialog
-  istTerminal: boolean
-  ghAngemeldet?: () => boolean
+  isTerminal: boolean
+  ghLoggedIn?: () => boolean
 }
 
-const abbruch = (meldung: string) => ({ exitCode: 1, meldung })
-const STRG_C = { exitCode: 130, meldung: `Abgebrochen. ${DATEI} wurde nicht geschrieben.` }
+const abort = (message: string) => ({ exitCode: 1, message })
+const CTRL_C = { exitCode: 130, message: `Aborted. ${FILE} was not written.` }
 
-/** `groundhog init`: fragt die Projekt-Konfiguration ab und schreibt nur `groundhog.json`. */
+/** `groundhog init`: asks for the project config and writes only `groundhog.json`. */
 export async function init({
-  verzeichnis,
+  directory,
   dialog,
-  istTerminal,
-  ghAngemeldet = () => spawnSync('gh', ['auth', 'status'], { stdio: 'ignore' }).status === 0,
-}: InitOptionen): Promise<{ exitCode: number; meldung: string }> {
+  isTerminal,
+  ghLoggedIn = () => spawnSync('gh', ['auth', 'status'], { stdio: 'ignore' }).status === 0,
+}: InitOptions): Promise<{ exitCode: number; message: string }> {
   let root: string | undefined
   try {
-    root = git(verzeichnis, 'rev-parse', '--show-toplevel')
+    root = git(directory, 'rev-parse', '--show-toplevel')
   } catch {}
-  if (root === undefined || realpathSync(root) !== realpathSync(verzeichnis)) {
-    return abbruch('groundhog init muss im Root eines Git-Repos laufen.')
+  if (root === undefined || realpathSync(root) !== realpathSync(directory)) {
+    return abort('groundhog init must run in the root of a Git repo.')
   }
   let url = ''
   try {
-    url = git(verzeichnis, 'config', '--get', 'remote.origin.url')
+    url = git(directory, 'config', '--get', 'remote.origin.url')
   } catch {}
   if (!/github\.com[:/]/.test(url)) {
-    return abbruch('groundhog init braucht einen GitHub-Remote als origin.')
+    return abort('groundhog init needs a GitHub remote as origin.')
   }
-  if (!ghAngemeldet()) return abbruch('gh ist nicht angemeldet. Melde dich mit `gh auth login` an.')
-  if (!istTerminal) return abbruch('groundhog init braucht ein Terminal an stdin.')
+  if (!ghLoggedIn()) return abort('gh is not logged in. Log in with `gh auth login`.')
+  if (!isTerminal) return abort('groundhog init needs a terminal on stdin.')
 
-  let vorgabe: Konfiguration = {
-    checks: nodeChecks(verzeichnis),
-    attempts: VERSUCHE_STANDARD,
+  let defaults: Config = {
+    checks: nodeChecks(directory),
+    attempts: DEFAULT_ATTEMPTS,
     targetBranches: [],
     sandbox: { hosts: [], off: false },
   }
-  const gelesen = leseKonfiguration(verzeichnis)
-  if (gelesen.ok) vorgabe = gelesen.konfiguration
-  else if (!gelesen.fehlt) {
-    dialog.info(`${DATEI} ist ungültig:\n${gelesen.fehler.map((f) => `- ${f}`).join('\n')}`)
-    const neu = await dialog.confirm({
-      message: `${DATEI} neu anlegen?`,
+  const read = readConfig(directory)
+  if (read.ok) defaults = read.config
+  else if (!read.missing) {
+    dialog.info(`${FILE} is invalid:\n${read.errors.map((e) => `- ${e}`).join('\n')}`)
+    const recreate = await dialog.confirm({
+      message: `Create ${FILE} anew?`,
       initialValue: false,
-      active: 'Ja',
-      inactive: 'Nein',
+      active: 'Yes',
+      inactive: 'No',
     })
-    if (typeof neu === 'symbol') return STRG_C
-    if (!neu) return abbruch(`${DATEI} bleibt unverändert.`)
+    if (typeof recreate === 'symbol') return CTRL_C
+    if (!recreate) return abort(`${FILE} stays unchanged.`)
   }
 
   const checks = await dialog.multiline({
-    message: 'Checks: ein Befehl pro Zeile, in dieser Reihenfolge im Repo-Root ausgeführt',
-    initialValue: vorgabe.checks.join('\n'),
-    validate: (w) => (zeilen(w).length > 0 ? undefined : 'Mindestens ein Check ist nötig.'),
+    message: 'Checks: one command per line, run in this order in the repo root',
+    initialValue: defaults.checks.join('\n'),
+    validate: (v) => (lines(v).length > 0 ? undefined : 'At least one check is required.'),
   })
-  if (typeof checks === 'symbol') return STRG_C
+  if (typeof checks === 'symbol') return CTRL_C
 
-  const standard = git(verzeichnis, 'ls-remote', '--symref', 'origin', 'HEAD').match(
+  const defaultBranch = git(directory, 'ls-remote', '--symref', 'origin', 'HEAD').match(
     /^ref: refs\/heads\/(\S+)\tHEAD/m,
   )?.[1]
-  const remote = git(verzeichnis, 'ls-remote', '--heads', 'origin')
+  const remote = git(directory, 'ls-remote', '--heads', 'origin')
     .split('\n')
-    .map((z) => z.split('\trefs/heads/')[1])
+    .map((l) => l.split('\trefs/heads/')[1])
     .filter((b): b is string => b !== undefined)
     .sort()
-  const vorn = vorgabe.targetBranches.filter((b) => remote.includes(b))
-  if (vorn.length === 0 && standard !== undefined) vorn.push(standard)
-  const reihenfolge = [...new Set([...vorn, ...remote])]
+  const front = defaults.targetBranches.filter((b) => remote.includes(b))
+  if (front.length === 0 && defaultBranch !== undefined) front.push(defaultBranch)
+  const order = [...new Set([...front, ...remote])]
   const targetBranches = await dialog.multiselect({
-    message: 'Ziel-Branches: wohin darf ein Lauf mergen? Der erste ist die Vorauswahl.',
-    options: reihenfolge.map((b) => ({ value: b, label: b })),
-    initialValues: vorn,
+    message: 'Target branches: where may a run merge? The first one is preselected.',
+    options: order.map((b) => ({ value: b, label: b })),
+    initialValues: front,
     required: true,
   })
-  if (typeof targetBranches === 'symbol') return STRG_C
+  if (typeof targetBranches === 'symbol') return CTRL_C
 
-  dialog.info(`Die Sandbox erreicht immer: ${FESTE_HOSTS.join(', ')}`)
+  dialog.info(`The sandbox always reaches: ${FIXED_HOSTS.join(', ')}`)
   const hosts = await dialog.text({
-    message: 'Zusätzliche Hosts, kommagetrennt (leer: keine)',
-    initialValue: vorgabe.sandbox.hosts.join(', '),
+    message: 'Additional hosts, comma-separated (empty: none)',
+    initialValue: defaults.sandbox.hosts.join(', '),
   })
-  if (typeof hosts === 'symbol') return STRG_C
+  if (typeof hosts === 'symbol') return CTRL_C
 
-  const versuche = await dialog.text({
-    message: 'Versuche pro Ticket (1 bis 10)',
-    initialValue: String(vorgabe.attempts),
-    validate: (w) => (gueltigeVersuche(w) ? undefined : 'Eine ganze Zahl von 1 bis 10.'),
+  const attempts = await dialog.text({
+    message: 'Attempts per ticket (1 to 10)',
+    initialValue: String(defaults.attempts),
+    validate: (v) => (validAttempts(v) ? undefined : 'A whole number from 1 to 10.'),
   })
-  if (typeof versuche === 'symbol') return STRG_C
+  if (typeof attempts === 'symbol') return CTRL_C
 
-  const konfiguration: Konfiguration = {
-    checks: zeilen(checks),
-    attempts: Number(versuche),
-    targetBranches: reihenfolge.filter((b) => targetBranches.includes(b)),
+  const config: Config = {
+    checks: lines(checks),
+    attempts: Number(attempts),
+    targetBranches: order.filter((b) => targetBranches.includes(b)),
     sandbox: {
       hosts: hosts
         .split(',')
         .map((h) => h.trim())
         .filter(Boolean),
-      off: vorgabe.sandbox.off,
+      off: defaults.sandbox.off,
     },
   }
-  writeFileSync(join(verzeichnis, DATEI), `${JSON.stringify(konfiguration, null, 2)}\n`)
+  writeFileSync(join(directory, FILE), `${JSON.stringify(config, null, 2)}\n`)
   return {
     exitCode: 0,
-    meldung: `${DATEI} geschrieben. Committe die Datei, dann starte groundhog <spec>.`,
+    message: `${FILE} written. Commit the file, then start groundhog <spec>.`,
   }
 }
 
-const zeilen = (text = '') =>
+const lines = (text = '') =>
   text
     .split('\n')
-    .map((z) => z.trim())
+    .map((l) => l.trim())
     .filter(Boolean)
 
-const gueltigeVersuche = (w = '') => /^\s*\d+\s*$/.test(w) && Number(w) >= 1 && Number(w) <= 10
+const validAttempts = (v = '') => /^\s*\d+\s*$/.test(v) && Number(v) >= 1 && Number(v) <= 10
 
-/** Vorschlag für ein Node-Projekt: Install passend zum Lockfile, dann typecheck, lint, test. */
-function nodeChecks(verzeichnis: string): string[] {
-  const paket = join(verzeichnis, 'package.json')
-  if (!existsSync(paket)) return []
+/** Suggestion for a Node project: install matching the lockfile, then typecheck, lint, test. */
+function nodeChecks(directory: string): string[] {
+  const pkg = join(directory, 'package.json')
+  if (!existsSync(pkg)) return []
   const lockfiles: [string, string, string][] = [
     ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile', 'pnpm'],
     ['yarn.lock', 'yarn install --frozen-lockfile', 'yarn'],
@@ -163,14 +163,14 @@ function nodeChecks(verzeichnis: string): string[] {
     ['bun.lockb', 'bun install --frozen-lockfile', 'bun'],
     ['package-lock.json', 'npm ci', 'npm'],
   ]
-  const [, install, pm] = lockfiles.find(([datei]) => existsSync(join(verzeichnis, datei))) ?? [
+  const [, install, pm] = lockfiles.find(([file]) => existsSync(join(directory, file))) ?? [
     '',
     'npm install',
     'npm',
   ]
   let scripts: Record<string, unknown> = {}
   try {
-    scripts = JSON.parse(readFileSync(paket, 'utf8')).scripts ?? {}
+    scripts = JSON.parse(readFileSync(pkg, 'utf8')).scripts ?? {}
   } catch {}
   return [
     install,

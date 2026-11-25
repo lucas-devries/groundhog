@@ -4,48 +4,48 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { git } from './git.ts'
 import { type Dialog, init } from './init.ts'
-import { FESTE_HOSTS } from './sandbox.ts'
-import { wegwerfRepo } from './testing/throwaway-repo.ts'
+import { FIXED_HOSTS } from './sandbox.ts'
+import { throwawayRepo } from './testing/throwaway-repo.ts'
 
-const ABBRUCH = Symbol('Strg+C')
-type Antwort = string | string[] | boolean | typeof ABBRUCH
+const CANCEL = Symbol('Ctrl+C')
+type Answer = string | string[] | boolean | typeof CANCEL
 
-/** Geskripteter Dialog: beantwortet die Fragen der Reihe nach und hält fest, was gezeigt wurde. */
-function fakeDialog(antworten: Antwort[]) {
-  const gezeigt: unknown[] = []
-  const antworte = async (frage: unknown) => {
-    gezeigt.push(frage)
-    const antwort = antworten.shift()
-    if (antwort === undefined) throw new Error(`keine Antwort für ${JSON.stringify(frage)}`)
-    return antwort
+/** Scripted dialog: answers the questions in order and records what was shown. */
+function fakeDialog(answers: Answer[]) {
+  const shown: unknown[] = []
+  const answer = async (question: unknown) => {
+    shown.push(question)
+    const a = answers.shift()
+    if (a === undefined) throw new Error(`no answer for ${JSON.stringify(question)}`)
+    return a
   }
   const dialog = {
-    multiline: (o) => antworte({ art: 'multiline', ...o }),
-    text: (o) => antworte({ art: 'text', ...o }),
-    multiselect: (o) => antworte({ art: 'multiselect', ...o }),
-    confirm: (o) => antworte({ art: 'confirm', ...o }),
-    info: (text) => gezeigt.push({ art: 'info', text }),
+    multiline: (o) => answer({ kind: 'multiline', ...o }),
+    text: (o) => answer({ kind: 'text', ...o }),
+    multiselect: (o) => answer({ kind: 'multiselect', ...o }),
+    confirm: (o) => answer({ kind: 'confirm', ...o }),
+    info: (text) => shown.push({ kind: 'info', text }),
   } as Dialog
-  return { dialog, gezeigt }
+  return { dialog, shown }
 }
 
-/** Ein Klon, dessen origin wie ein GitHub-Remote aussieht, mit den Remote-Branches main, develop, alt. */
-function githubKlon(): string {
-  const { remote, klon } = wegwerfRepo()
-  for (const b of ['develop', 'alt']) git(klon, 'push', '-q', 'origin', `main:${b}`)
-  const url = 'https://github.com/beispiel/projekt.git'
-  git(klon, 'remote', 'set-url', 'origin', url)
-  git(klon, 'config', `url.${remote}.insteadOf`, url)
-  return klon
+/** A clone whose origin looks like a GitHub remote, with the remote branches main, develop, old. */
+function githubClone(): string {
+  const { remote, clone } = throwawayRepo()
+  for (const b of ['develop', 'old']) git(clone, 'push', '-q', 'origin', `main:${b}`)
+  const url = 'https://github.com/example/project.git'
+  git(clone, 'remote', 'set-url', 'origin', url)
+  git(clone, 'config', `url.${remote}.insteadOf`, url)
+  return clone
 }
 
-const starte = (verzeichnis: string, dialog: Dialog, umgebung = {}) =>
-  init({ verzeichnis, dialog, istTerminal: true, ghAngemeldet: () => true, ...umgebung })
+const start = (directory: string, dialog: Dialog, env = {}) =>
+  init({ directory, dialog, isTerminal: true, ghLoggedIn: () => true, ...env })
 
-const datei = (verzeichnis: string) => readFileSync(join(verzeichnis, 'groundhog.json'), 'utf8')
+const file = (directory: string) => readFileSync(join(directory, 'groundhog.json'), 'utf8')
 
-test('init legt groundhog.json mit allen Feldern an, schreibt sonst nichts und nennt den nächsten Schritt', async () => {
-  const klon = githubKlon()
+test('init creates groundhog.json with all fields, writes nothing else and names the next step', async () => {
+  const clone = githubClone()
   const { dialog } = fakeDialog([
     'npm test\n\n  npm run lint  \n',
     ['main', 'develop'],
@@ -53,9 +53,9 @@ test('init legt groundhog.json mit allen Feldern an, schreibt sonst nichts und n
     '5',
   ])
 
-  const ergebnis = await starte(klon, dialog)
+  const result = await start(clone, dialog)
 
-  expect(datei(klon)).toBe(
+  expect(file(clone)).toBe(
     `{
   "checks": [
     "npm test",
@@ -76,59 +76,57 @@ test('init legt groundhog.json mit allen Feldern an, schreibt sonst nichts und n
 }
 `,
   )
-  expect(git(klon, 'status', '--porcelain')).toBe('?? groundhog.json')
-  expect(git(klon, 'log', '--format=%s')).toBe('init')
-  expect(ergebnis.exitCode).toBe(0)
-  expect(ergebnis.meldung.split('\n').at(-1)).toMatch(
-    /groundhog\.json.*committe.*groundhog <spec>/i,
-  )
+  expect(git(clone, 'status', '--porcelain')).toBe('?? groundhog.json')
+  expect(git(clone, 'log', '--format=%s')).toBe('init')
+  expect(result.exitCode).toBe(0)
+  expect(result.message.split('\n').at(-1)).toMatch(/groundhog\.json.*commit.*groundhog <spec>/i)
 })
 
-test('init stellt vier Fragen: Checks, Ziel-Branches mit Default-Branch vorn, Hosts unter der festen Liste, Versuche', async () => {
-  const klon = githubKlon()
-  const { dialog, gezeigt } = fakeDialog(['true', ['main'], '', '3'])
+test('init asks four questions: checks, target branches with the default branch first, hosts below the fixed list, attempts', async () => {
+  const clone = githubClone()
+  const { dialog, shown } = fakeDialog(['true', ['main'], '', '3'])
 
-  await starte(klon, dialog)
+  await start(clone, dialog)
 
-  expect(gezeigt).toEqual([
-    expect.objectContaining({ art: 'multiline', initialValue: '' }),
+  expect(shown).toEqual([
+    expect.objectContaining({ kind: 'multiline', initialValue: '' }),
     expect.objectContaining({
-      art: 'multiselect',
+      kind: 'multiselect',
       options: [
         { value: 'main', label: 'main' },
-        { value: 'alt', label: 'alt' },
         { value: 'develop', label: 'develop' },
+        { value: 'old', label: 'old' },
       ],
       initialValues: ['main'],
     }),
-    { art: 'info', text: expect.stringContaining(FESTE_HOSTS.join(', ')) },
-    expect.objectContaining({ art: 'text', initialValue: '' }),
-    expect.objectContaining({ art: 'text', initialValue: '3' }),
+    { kind: 'info', text: expect.stringContaining(FIXED_HOSTS.join(', ')) },
+    expect.objectContaining({ kind: 'text', initialValue: '' }),
+    expect.objectContaining({ kind: 'text', initialValue: '3' }),
   ])
-  expect(JSON.parse(datei(klon))).toMatchObject({ attempts: 3, sandbox: { hosts: [] } })
+  expect(JSON.parse(file(clone))).toMatchObject({ attempts: 3, sandbox: { hosts: [] } })
 })
 
-test('Checks brauchen mindestens einen Befehl, Versuche eine ganze Zahl von 1 bis 10', async () => {
-  const { dialog, gezeigt } = fakeDialog(['true', ['main'], '', '3'])
-  await starte(githubKlon(), dialog)
-  type Pruefe = { validate: (wert: string) => string | undefined }
-  const checks = gezeigt[0] as Pruefe
-  const attempts = gezeigt[4] as Pruefe
+test('checks need at least one command, attempts a whole number from 1 to 10', async () => {
+  const { dialog, shown } = fakeDialog(['true', ['main'], '', '3'])
+  await start(githubClone(), dialog)
+  type Validates = { validate: (value: string) => string | undefined }
+  const checks = shown[0] as Validates
+  const attempts = shown[4] as Validates
 
   expect(checks.validate(' \n ')).toBeDefined()
   expect(checks.validate('npm test')).toBeUndefined()
-  for (const falsch of ['', '0', '11', '2.5', 'drei'])
-    expect(attempts.validate(falsch)).toBeDefined()
-  for (const gut of ['1', '10', ' 4 ']) expect(attempts.validate(gut)).toBeUndefined()
+  for (const wrong of ['', '0', '11', '2.5', 'three'])
+    expect(attempts.validate(wrong)).toBeDefined()
+  for (const good of ['1', '10', ' 4 ']) expect(attempts.validate(good)).toBeUndefined()
 })
 
-test('die Reihenfolge der Ziel-Branches folgt der Liste, nicht der Auswahl', async () => {
-  const klon = githubKlon()
+test('the order of the target branches follows the list, not the selection', async () => {
+  const clone = githubClone()
   const { dialog } = fakeDialog(['true', ['develop', 'main'], '', '3'])
 
-  await starte(klon, dialog)
+  await start(clone, dialog)
 
-  expect(JSON.parse(datei(klon)).targetBranches).toEqual(['main', 'develop'])
+  expect(JSON.parse(file(clone)).targetBranches).toEqual(['main', 'develop'])
 })
 
 test.each([
@@ -138,40 +136,40 @@ test.each([
   ['bun.lock', 'bun install --frozen-lockfile', 'bun run'],
   [undefined, 'npm install', 'npm run'],
 ])(
-  'Node-Projekt mit %s: Vorschlag aus Lockfile und den Scripts typecheck, lint, test',
+  'Node project with %s: suggestion from the lockfile and the scripts typecheck, lint, test',
   async (lockfile, install, run) => {
-    const klon = githubKlon()
+    const clone = githubClone()
     const scripts = { build: 'tsc', test: 'vitest', typecheck: 'tsc --noEmit', lint: 'biome check' }
-    writeFileSync(join(klon, 'package.json'), JSON.stringify({ scripts }))
-    if (lockfile) writeFileSync(join(klon, lockfile), '')
-    const { dialog, gezeigt } = fakeDialog(['true', ['main'], '', '3'])
+    writeFileSync(join(clone, 'package.json'), JSON.stringify({ scripts }))
+    if (lockfile) writeFileSync(join(clone, lockfile), '')
+    const { dialog, shown } = fakeDialog(['true', ['main'], '', '3'])
 
-    await starte(klon, dialog)
+    await start(clone, dialog)
 
-    expect(gezeigt[0]).toMatchObject({
+    expect(shown[0]).toMatchObject({
       initialValue: `${install}\n${run} typecheck\n${run} lint\n${run} test`,
     })
   },
 )
 
-test('Strg+C bei jeder Frage schreibt nichts', async () => {
-  for (let frage = 0; frage < 4; frage++) {
-    const klon = githubKlon()
-    const antworten: Antwort[] = ['true', ['main'], '', '3']
-    antworten[frage] = ABBRUCH
-    const { dialog } = fakeDialog(antworten)
+test('Ctrl+C at any question writes nothing', async () => {
+  for (let question = 0; question < 4; question++) {
+    const clone = githubClone()
+    const answers: Answer[] = ['true', ['main'], '', '3']
+    answers[question] = CANCEL
+    const { dialog } = fakeDialog(answers)
 
-    const ergebnis = await starte(klon, dialog)
+    const result = await start(clone, dialog)
 
-    expect(existsSync(join(klon, 'groundhog.json'))).toBe(false)
-    expect(ergebnis.exitCode).toBe(130)
+    expect(existsSync(join(clone, 'groundhog.json'))).toBe(false)
+    expect(result.exitCode).toBe(130)
   }
 })
 
-test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.off bleibt erhalten', async () => {
-  const klon = githubKlon()
+test('second call: existing values as defaults, sandbox.off is kept', async () => {
+  const clone = githubClone()
   writeFileSync(
-    join(klon, 'groundhog.json'),
+    join(clone, 'groundhog.json'),
     JSON.stringify({
       checks: ['make test', 'make lint'],
       attempts: 7,
@@ -179,25 +177,25 @@ test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.off bleibt erhalten'
       sandbox: { hosts: ['x.com', 'y.com'], off: true },
     }),
   )
-  const { dialog, gezeigt } = fakeDialog(['make test', ['main', 'develop'], 'x.com', '7'])
+  const { dialog, shown } = fakeDialog(['make test', ['main', 'develop'], 'x.com', '7'])
 
-  await starte(klon, dialog)
+  await start(clone, dialog)
 
-  expect(gezeigt).toEqual([
+  expect(shown).toEqual([
     expect.objectContaining({ initialValue: 'make test\nmake lint' }),
     expect.objectContaining({
       options: [
         { value: 'develop', label: 'develop' },
         { value: 'main', label: 'main' },
-        { value: 'alt', label: 'alt' },
+        { value: 'old', label: 'old' },
       ],
       initialValues: ['develop', 'main'],
     }),
-    expect.objectContaining({ art: 'info' }),
+    expect.objectContaining({ kind: 'info' }),
     expect.objectContaining({ initialValue: 'x.com, y.com' }),
     expect.objectContaining({ initialValue: '7' }),
   ])
-  expect(JSON.parse(datei(klon))).toEqual({
+  expect(JSON.parse(file(clone))).toEqual({
     checks: ['make test'],
     attempts: 7,
     targetBranches: ['develop', 'main'],
@@ -205,61 +203,56 @@ test('zweiter Aufruf: vorhandene Werte als Vorgabe, sandbox.off bleibt erhalten'
   })
 })
 
-test('zweiter Aufruf bei ungültiger Datei: Fehler zeigen; bei Nein bleibt die Datei unverändert', async () => {
-  const klon = githubKlon()
-  writeFileSync(join(klon, 'groundhog.json'), '{"checks": [], "ziel": 1}')
-  const { dialog, gezeigt } = fakeDialog([false])
+test('second call with an invalid file: show errors; on No the file stays unchanged', async () => {
+  const clone = githubClone()
+  writeFileSync(join(clone, 'groundhog.json'), '{"checks": [], "target": 1}')
+  const { dialog, shown } = fakeDialog([false])
 
-  const ergebnis = await starte(klon, dialog)
+  const result = await start(clone, dialog)
 
-  expect(gezeigt).toEqual([
-    { art: 'info', text: expect.stringContaining('checks: mindestens ein Eintrag nötig') },
-    expect.objectContaining({ art: 'confirm', active: 'Ja', inactive: 'Nein' }),
+  expect(shown).toEqual([
+    { kind: 'info', text: expect.stringContaining('checks: at least one entry required') },
+    expect.objectContaining({ kind: 'confirm', active: 'Yes', inactive: 'No' }),
   ])
-  expect((gezeigt[0] as { text: string }).text).toContain('unbekannter Schlüssel: ziel')
-  expect(datei(klon)).toBe('{"checks": [], "ziel": 1}')
-  expect(ergebnis.exitCode).toBe(1)
+  expect((shown[0] as { text: string }).text).toContain('unknown key: target')
+  expect(file(clone)).toBe('{"checks": [], "target": 1}')
+  expect(result.exitCode).toBe(1)
 })
 
-test('zweiter Aufruf bei ungültiger Datei: bei Ja neu anlegen mit frischen Vorgaben', async () => {
-  const klon = githubKlon()
-  writeFileSync(join(klon, 'groundhog.json'), 'kaputt')
-  const { dialog, gezeigt } = fakeDialog([true, 'true', ['main'], '', '3'])
+test('second call with an invalid file: on Yes create anew with fresh defaults', async () => {
+  const clone = githubClone()
+  writeFileSync(join(clone, 'groundhog.json'), 'broken')
+  const { dialog, shown } = fakeDialog([true, 'true', ['main'], '', '3'])
 
-  const ergebnis = await starte(klon, dialog)
+  const result = await start(clone, dialog)
 
-  expect(gezeigt[2]).toMatchObject({ art: 'multiline', initialValue: '' })
-  expect(JSON.parse(datei(klon))).toMatchObject({ checks: ['true'] })
-  expect(ergebnis.exitCode).toBe(0)
+  expect(shown[2]).toMatchObject({ kind: 'multiline', initialValue: '' })
+  expect(JSON.parse(file(clone))).toMatchObject({ checks: ['true'] })
+  expect(result.exitCode).toBe(0)
 })
 
 test.each([
+  ['outside a Git repo', () => mkdtempSync(join(tmpdir(), 'groundhog-')), {}, /root of a Git repo/],
   [
-    'außerhalb eines Git-Repos',
-    () => mkdtempSync(join(tmpdir(), 'groundhog-')),
-    {},
-    /Root eines Git-Repos/,
-  ],
-  [
-    'in einem Unterordner',
+    'in a subfolder',
     () => {
-      const klon = githubKlon()
-      mkdirSync(join(klon, 'unter'))
-      return join(klon, 'unter')
+      const clone = githubClone()
+      mkdirSync(join(clone, 'sub'))
+      return join(clone, 'sub')
     },
     {},
-    /Root eines Git-Repos/,
+    /root of a Git repo/,
   ],
-  ['ohne GitHub-Remote', () => wegwerfRepo().klon, {}, /GitHub-Remote/],
-  ['ohne Anmeldung bei gh', githubKlon, { ghAngemeldet: () => false }, /gh auth login/],
-  ['ohne Terminal an stdin', githubKlon, { istTerminal: false }, /Terminal/],
-])('init bricht %s mit Grund ab und schreibt nichts', async (_, verzeichnis, umgebung, grund) => {
-  const v = verzeichnis()
-  const { dialog, gezeigt } = fakeDialog([])
+  ['without a GitHub remote', () => throwawayRepo().clone, {}, /GitHub remote/],
+  ['without gh login', githubClone, { ghLoggedIn: () => false }, /gh auth login/],
+  ['without a terminal on stdin', githubClone, { isTerminal: false }, /terminal/],
+])('init aborts %s with a reason and writes nothing', async (_, directory, env, reason) => {
+  const d = directory()
+  const { dialog, shown } = fakeDialog([])
 
-  const ergebnis = await starte(v, dialog, umgebung)
+  const result = await start(d, dialog, env)
 
-  expect(ergebnis).toEqual({ exitCode: 1, meldung: expect.stringMatching(grund) })
-  expect(gezeigt).toEqual([])
-  expect(existsSync(join(v, 'groundhog.json'))).toBe(false)
+  expect(result).toEqual({ exitCode: 1, message: expect.stringMatching(reason) })
+  expect(shown).toEqual([])
+  expect(existsSync(join(d, 'groundhog.json'))).toBe(false)
 })

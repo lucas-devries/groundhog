@@ -1,156 +1,156 @@
-/** Freigabe für den Agent. */
+/** Release for the agent. */
 export const READY_FOR_AGENT = 'ready-for-agent'
-/** Braucht einen Menschen; der Agent fasst es nicht an. */
+/** Needs a human; the agent doesn't touch it. */
 export const READY_FOR_HUMAN = 'ready-for-human'
 
 export interface Ticket {
-  nummer: number
-  offen: boolean
+  number: number
+  open: boolean
   labels: string[]
   assignees: string[]
-  /** Alle Blocker, auch solche außerhalb der Spec, mit ihrem Zustand. */
-  blocker: Blocker[]
+  /** All blockers, including those outside the spec, with their state. */
+  blockers: Blocker[]
 }
 
 export interface Blocker {
-  nummer: number
-  offen: boolean
+  number: number
+  open: boolean
 }
 
-/** Ob ein Ticket zur Frontier gehört (`bearbeitbar`), sonst der Grund dagegen. */
-export type FrontierZustand =
-  | 'bearbeitbar'
-  | 'geschlossen'
+/** Whether a ticket belongs to the frontier (`workable`), otherwise the reason against it. */
+export type FrontierState =
+  | 'workable'
+  | 'closed'
   | 'ready-for-human'
-  | 'nicht freigegeben'
-  | 'blockiert'
-  /** Jemand anderem zugewiesen. */
-  | 'vergeben'
+  | 'not released'
+  | 'blocked'
+  /** Assigned to someone else. */
+  | 'taken'
 
 /**
- * Die Frontier-Regel, an einer Stelle. Ein dem eigenen `nutzer` zugewiesenes Ticket ist der Rest
- * eines abgebrochenen Laufs und bleibt bearbeitbar.
+ * The frontier rule, in one place. A ticket assigned to the own `user` is the remnant of an
+ * aborted run and stays workable.
  */
-export function frontierZustand(t: Ticket, nutzer: string): FrontierZustand {
-  if (!t.offen) return 'geschlossen'
+export function frontierState(t: Ticket, user: string): FrontierState {
+  if (!t.open) return 'closed'
   if (t.labels.includes(READY_FOR_HUMAN)) return 'ready-for-human'
-  if (!t.labels.includes(READY_FOR_AGENT)) return 'nicht freigegeben'
-  if (t.blocker.some((b) => b.offen)) return 'blockiert'
-  if (!t.assignees.every((a) => a === nutzer)) return 'vergeben'
-  return 'bearbeitbar'
+  if (!t.labels.includes(READY_FOR_AGENT)) return 'not released'
+  if (t.blockers.some((b) => b.open)) return 'blocked'
+  if (!t.assignees.every((a) => a === user)) return 'taken'
+  return 'workable'
 }
 
-/** Der Tracker in der Form, die die Engine braucht. Dahinter: GitHub-Adapter (#32), In-Memory-Tracker. */
+/** The tracker in the shape the engine needs. Behind it: GitHub adapter (#32), in-memory tracker. */
 export interface Tracker {
-  /** Der angemeldete Nutzer, auf den die Engine beansprucht. */
-  readonly nutzer: string
+  /** The logged-in user the engine claims for. */
+  readonly user: string
   taskGraph(spec: number): Promise<Ticket[]>
-  beanspruche(ticket: number): Promise<void>
-  /** Schließt ein Ticket oder die Spec. */
-  schliesse(issue: number): Promise<void>
-  /** Nimmt den eigenen Assignee wieder vom Ticket. */
-  gibFrei(ticket: number): Promise<void>
-  /** Öffnet das Ticket wieder; ist es offen, geschieht nichts. */
-  oeffneWieder(ticket: number): Promise<void>
-  /** Tauscht `ready-for-agent` gegen `ready-for-human`. */
-  markiereGescheitert(ticket: number): Promise<void>
-  kommentiere(issue: number, text: string): Promise<void>
-  /** Legt einen PR an und liefert seine URL. */
-  erstellePr(pr: Pr): Promise<string>
+  claim(ticket: number): Promise<void>
+  /** Closes a ticket or the spec. */
+  close(issue: number): Promise<void>
+  /** Removes the own assignee from the ticket again. */
+  release(ticket: number): Promise<void>
+  /** Reopens the ticket; if it is open, nothing happens. */
+  reopen(ticket: number): Promise<void>
+  /** Swaps `ready-for-agent` for `ready-for-human`. */
+  markFailed(ticket: number): Promise<void>
+  comment(issue: number, text: string): Promise<void>
+  /** Creates a PR and returns its URL. */
+  createPr(pr: Pr): Promise<string>
 }
 
 export interface Pr {
-  /** Branch mit der Arbeit. */
+  /** Branch with the work. */
   integrationBranch: string
-  /** Branch, in den der PR mergt. */
-  zielBranch: string
-  titel: string
+  /** Branch the PR merges into. */
+  targetBranch: string
+  title: string
   body: string
 }
 
-/** Tracker im Speicher für Tests. `nutzer` spielt den angemeldeten `gh`-Nutzer. */
+/** Tracker in memory for tests. `user` plays the logged-in `gh` user. */
 export class InMemoryTracker implements Tracker {
   readonly #tickets: Ticket[]
-  /** Geschlossene Issues außerhalb der Tickets, etwa die Spec. */
-  readonly #geschlossen = new Set<number>()
-  readonly #kommentare = new Map<number, string[]>()
-  /** Angelegte PRs in Reihenfolge. */
+  /** Closed issues outside the tickets, such as the spec. */
+  readonly #closed = new Set<number>()
+  readonly #comments = new Map<number, string[]>()
+  /** Created PRs in order. */
   readonly prs: Pr[] = []
 
   constructor(
-    readonly nutzer: string,
+    readonly user: string,
     tickets: Ticket[],
   ) {
     this.#tickets = structuredClone(tickets)
   }
 
-  /** Stand eines Tickets, als Kopie. */
-  ticket(nummer: number): Ticket {
-    return structuredClone(this.#finde(nummer))
+  /** State of a ticket, as a copy. */
+  ticket(number: number): Ticket {
+    return structuredClone(this.#find(number))
   }
 
-  /** Ob ein Ticket oder ein anderes Issue (etwa die Spec) offen ist. */
-  offen(nummer: number): boolean {
-    return this.#tickets.find((t) => t.nummer === nummer)?.offen ?? !this.#geschlossen.has(nummer)
+  /** Whether a ticket or another issue (such as the spec) is open. */
+  isOpen(number: number): boolean {
+    return this.#tickets.find((t) => t.number === number)?.open ?? !this.#closed.has(number)
   }
 
-  kommentare(nummer: number): string[] {
-    return [...(this.#kommentare.get(nummer) ?? [])]
+  comments(number: number): string[] {
+    return [...(this.#comments.get(number) ?? [])]
   }
 
-  /** Ändert ein Ticket von außen, wie ein Mensch im Tracker während des Laufs. */
-  aendere(nummer: number, aenderung: (ticket: Ticket) => void) {
-    aenderung(this.#finde(nummer))
+  /** Changes a ticket from outside, like a human in the tracker during the run. */
+  change(number: number, change: (ticket: Ticket) => void) {
+    change(this.#find(number))
   }
 
-  /** Blocker aus der Spec tragen den Zustand ihres Tickets; die übrigen den mitgegebenen. */
+  /** Blockers from the spec carry the state of their ticket; the others the one given. */
   async taskGraph(): Promise<Ticket[]> {
     return structuredClone(this.#tickets).map((t) => ({
       ...t,
-      blocker: t.blocker.map((b) => ({
-        nummer: b.nummer,
-        offen: this.#tickets.find((s) => s.nummer === b.nummer)?.offen ?? b.offen,
+      blockers: t.blockers.map((b) => ({
+        number: b.number,
+        open: this.#tickets.find((s) => s.number === b.number)?.open ?? b.open,
       })),
     }))
   }
 
-  async beanspruche(nummer: number) {
-    const ticket = this.#finde(nummer)
-    if (!ticket.assignees.includes(this.nutzer)) ticket.assignees.push(this.nutzer)
+  async claim(number: number) {
+    const ticket = this.#find(number)
+    if (!ticket.assignees.includes(this.user)) ticket.assignees.push(this.user)
   }
 
-  async schliesse(nummer: number) {
-    const ticket = this.#tickets.find((t) => t.nummer === nummer)
-    if (ticket) ticket.offen = false
-    else this.#geschlossen.add(nummer)
+  async close(number: number) {
+    const ticket = this.#tickets.find((t) => t.number === number)
+    if (ticket) ticket.open = false
+    else this.#closed.add(number)
   }
 
-  async kommentiere(nummer: number, text: string) {
-    this.#kommentare.set(nummer, [...this.kommentare(nummer), text])
+  async comment(number: number, text: string) {
+    this.#comments.set(number, [...this.comments(number), text])
   }
 
-  async erstellePr(pr: Pr) {
+  async createPr(pr: Pr) {
     this.prs.push(pr)
     return `https://github.example/pull/${this.prs.length}`
   }
 
-  async gibFrei(nummer: number) {
-    const ticket = this.#finde(nummer)
-    ticket.assignees = ticket.assignees.filter((a) => a !== this.nutzer)
+  async release(number: number) {
+    const ticket = this.#find(number)
+    ticket.assignees = ticket.assignees.filter((a) => a !== this.user)
   }
 
-  async oeffneWieder(nummer: number) {
-    this.#finde(nummer).offen = true
+  async reopen(number: number) {
+    this.#find(number).open = true
   }
 
-  async markiereGescheitert(nummer: number) {
-    const ticket = this.#finde(nummer)
+  async markFailed(number: number) {
+    const ticket = this.#find(number)
     ticket.labels = [...ticket.labels.filter((l) => l !== READY_FOR_AGENT), READY_FOR_HUMAN]
   }
 
-  #finde(nummer: number): Ticket {
-    const ticket = this.#tickets.find((t) => t.nummer === nummer)
-    if (!ticket) throw new Error(`Ticket #${nummer} gibt es nicht`)
+  #find(number: number): Ticket {
+    const ticket = this.#tickets.find((t) => t.number === number)
+    if (!ticket) throw new Error(`Ticket #${number} does not exist`)
     return ticket
   }
 }

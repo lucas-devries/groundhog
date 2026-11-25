@@ -1,69 +1,69 @@
 import type { Ticket } from './tracker.ts'
 
-export interface RunAuftrag {
+export interface SessionRequest {
   ticket: Ticket
-  /** Repo-Root, auf dem Ticket-Branch ausgecheckt. */
-  verzeichnis: string
-  /** SHA am Abzweig des Ticket-Branch. */
-  fixpunkt: string
-  /** Ab dem zweiten Versuch: warum der letzte rot war, mit der Check-Ausgabe. */
-  rueckmeldung?: string
-  /** Bricht ab, wenn das Zeitlimit des Runs erreicht ist; der Adapter beendet dann den Run. */
+  /** Repo root, checked out on the ticket branch. */
+  directory: string
+  /** SHA where the ticket branch forks off. */
+  forkPoint: string
+  /** From the second attempt on: why the last one was red, with the check output. */
+  feedback?: string
+  /** Aborts when the session's time limit is reached; the adapter then ends the session. */
   signal: AbortSignal
   /**
-   * Nimmt jede Zeile der rohen Ausgabe des Runs entgegen (bei Claude: `stream-json`) und liefert
-   * sie gefiltert zurück. Der Adapter wertet nur die gefilterte Zeile aus, etwa für die Blocks.
+   * Takes every line of the session's raw output (for Claude: `stream-json`) and returns it
+   * filtered. The adapter only evaluates the filtered line, for example for the blocks.
    */
-  ausgabe: (zeile: string) => string
+  output: (line: string) => string
 }
 
-export interface RunErgebnis {
-  erfolg: boolean
+export interface SessionResult {
+  success: boolean
   /**
-   * Abbruch am Usage-Limit: die Reset-Zeit in ms, oder `'guthaben'`, wenn es ohne Reset-Zeit
-   * nur mit Guthaben weitergeht.
+   * Aborted at the usage limit: the reset time in ms, or `'credit'` if, without a reset time, it
+   * only goes on with credit.
    */
-  usageLimit?: number | 'guthaben'
-  /** Tokens des Runs, wie `claude` sie meldet (`usage`). */
+  usageLimit?: number | 'credit'
+  /** Tokens of the session, as `claude` reports them (`usage`). */
   tokens?: Record<string, number>
-  kostenUsd?: number
-  /** Für `claude --resume <sessionId>` in Übersicht und Kommentar. */
+  costUsd?: number
+  /** For `claude --resume <sessionId>` in summary and comment. */
   sessionId?: string
-  /** Die verfügbaren Skills, wie der Run sie meldet (`init`-Event von `claude`). */
+  /** The available skills, as the session reports them (`init` event of `claude`). */
   skills?: string[]
-  /** Aufrufe, die im Run verweigert wurden. */
+  /** Calls that were refused in the session. */
   blocks?: Block[]
 }
 
-/** Ein verweigerter Aufruf: Tool, sein wichtigstes Argument und, falls gemeldet, die Begründung. */
+/** A refused call: tool, its most important argument and, if reported, the reason. */
 export interface Block {
   tool: string
-  befehl: string
-  grund?: string
+  command: string
+  reason?: string
 }
 
-/** Der Agent: startet einen Run an einem Ticket. Dahinter: Claude-Adapter (#33), Fake-Agent. */
+/** The agent: starts a session on a ticket. Behind it: Claude adapter (#33), fake agent. */
 export interface Agent {
-  run(auftrag: RunAuftrag): Promise<RunErgebnis>
-  /** Reset-Zeit in ms des spätesten noch erschöpften Fensters; `undefined`, wenn keins erschöpft ist. */
-  erschoepftBis(): Promise<number | undefined>
+  runSession(request: SessionRequest): Promise<SessionResult>
+  /** Reset time in ms of the latest window still exhausted; `undefined` if none is exhausted. */
+  exhaustedUntil(): Promise<number | undefined>
 }
 
-/** Ein Schritt im Skript des Fake-Agents: was ein Run tut und wie er endet. */
-export type AgentSkript = (auftrag: RunAuftrag) => RunErgebnis | Promise<RunErgebnis>
+/** A step in the fake agent's script: what a session does and how it ends. */
+export type AgentScript = (request: SessionRequest) => SessionResult | Promise<SessionResult>
 
-/** Geskripteter Fake-Agent: jeder Run spielt den nächsten Schritt des Skripts ab. */
+/** Scripted fake agent: each session plays the next step of the script. */
 export function fakeAgent(
-  skript: AgentSkript[],
-  erschoepftBis: () => number | undefined = () => undefined,
+  script: AgentScript[],
+  exhaustedUntil: () => number | undefined = () => undefined,
 ): Agent {
-  let runs = 0
+  let sessions = 0
   return {
-    async run(auftrag) {
-      const schritt = skript[runs++]
-      if (!schritt) throw new Error(`Fake-Agent: kein Skript für Run ${runs}`)
-      return schritt(auftrag)
+    async runSession(request) {
+      const step = script[sessions++]
+      if (!step) throw new Error(`Fake agent: no script for session ${sessions}`)
+      return step(request)
     },
-    erschoepftBis: async () => erschoepftBis(),
+    exhaustedUntil: async () => exhaustedUntil(),
   }
 }

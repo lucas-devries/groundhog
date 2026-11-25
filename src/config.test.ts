@@ -2,30 +2,30 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { leseKonfiguration } from './config.ts'
+import { readConfig } from './config.ts'
 
-function mitDatei(inhalt: string): string {
-  const verzeichnis = mkdtempSync(join(tmpdir(), 'groundhog-'))
-  writeFileSync(join(verzeichnis, 'groundhog.json'), inhalt)
-  return verzeichnis
+function withFile(content: string): string {
+  const directory = mkdtempSync(join(tmpdir(), 'groundhog-'))
+  writeFileSync(join(directory, 'groundhog.json'), content)
+  return directory
 }
 
-const fehlerVon = (inhalt: unknown) => {
-  const gelesen = leseKonfiguration(mitDatei(JSON.stringify(inhalt)))
-  return gelesen.ok ? [] : gelesen.fehler
+const errorsOf = (content: unknown) => {
+  const read = readConfig(withFile(JSON.stringify(content)))
+  return read.ok ? [] : read.errors
 }
 
-test('eine fehlende Datei verweist auf groundhog init', () => {
-  const gelesen = leseKonfiguration(mkdtempSync(join(tmpdir(), 'groundhog-')))
+test('a missing file points to groundhog init', () => {
+  const read = readConfig(mkdtempSync(join(tmpdir(), 'groundhog-')))
 
-  expect(gelesen).toMatchObject({ ok: false, fehlt: true })
-  expect(gelesen.ok || gelesen.fehler.join()).toContain('groundhog init')
+  expect(read).toMatchObject({ ok: false, missing: true })
+  expect(read.ok || read.errors.join()).toContain('groundhog init')
 })
 
-test('nur die Pflichtfelder ergeben die Defaults der übrigen', () => {
-  expect(leseKonfiguration(mitDatei('{"checks":["npm test"],"targetBranches":["main"]}'))).toEqual({
+test('only the required fields give the defaults of the rest', () => {
+  expect(readConfig(withFile('{"checks":["npm test"],"targetBranches":["main"]}'))).toEqual({
     ok: true,
-    konfiguration: {
+    config: {
       checks: ['npm test'],
       attempts: 3,
       targetBranches: ['main'],
@@ -34,84 +34,84 @@ test('nur die Pflichtfelder ergeben die Defaults der übrigen', () => {
   })
 })
 
-test('alle Felder gesetzt werden übernommen', () => {
-  const datei = {
+test('all fields set are taken over', () => {
+  const file = {
     checks: ['npm ci', 'npm test'],
     attempts: 10,
     targetBranches: ['develop', 'main'],
     sandbox: { hosts: ['*.example.com'], off: true },
   }
 
-  expect(leseKonfiguration(mitDatei(JSON.stringify(datei)))).toEqual({
+  expect(readConfig(withFile(JSON.stringify(file)))).toEqual({
     ok: true,
-    konfiguration: datei,
+    config: file,
   })
 })
 
-test('kein JSON', () => {
-  const gelesen = leseKonfiguration(mitDatei('{ checks: '))
+test('no JSON', () => {
+  const read = readConfig(withFile('{ checks: '))
 
-  expect(gelesen).toMatchObject({ ok: false, fehlt: false })
-  expect(gelesen.ok || gelesen.fehler).toEqual([
-    expect.stringContaining('groundhog.json ist kein gültiges JSON'),
+  expect(read).toMatchObject({ ok: false, missing: false })
+  expect(read.ok || read.errors).toEqual([
+    expect.stringContaining('groundhog.json is not valid JSON'),
   ])
 })
 
-test('kein Objekt', () => {
-  expect(fehlerVon(['npm test'])).toEqual(['groundhog.json muss ein JSON-Objekt sein'])
+test('no object', () => {
+  expect(errorsOf(['npm test'])).toEqual(['groundhog.json must be a JSON object'])
 })
 
-test('fehlende Pflichtfelder', () => {
-  expect(fehlerVon({})).toEqual(['checks fehlt', 'targetBranches fehlt'])
+test('missing required fields', () => {
+  expect(errorsOf({})).toEqual(['checks is missing', 'targetBranches is missing'])
 })
 
-test('leere Listen', () => {
-  expect(fehlerVon({ checks: [], targetBranches: [] })).toEqual([
-    'checks: mindestens ein Eintrag nötig',
-    'targetBranches: mindestens ein Eintrag nötig',
+test('empty lists', () => {
+  expect(errorsOf({ checks: [], targetBranches: [] })).toEqual([
+    'checks: at least one entry required',
+    'targetBranches: at least one entry required',
   ])
 })
 
-test('falsche Typen', () => {
+test('wrong types', () => {
   expect(
-    fehlerVon({
+    errorsOf({
       checks: 'npm test',
       attempts: '3',
       targetBranches: ['main', 1],
-      sandbox: { hosts: 'a.com', off: 'nein' },
+      sandbox: { hosts: 'a.com', off: 'no' },
     }),
   ).toEqual([
-    'checks: Liste von Strings erwartet',
-    'attempts: ganze Zahl von 1 bis 10 erwartet',
-    'targetBranches: Liste von Strings erwartet',
-    'sandbox.hosts: Liste von Strings erwartet',
-    'sandbox.off: true oder false erwartet',
+    'checks: list of strings expected',
+    'attempts: whole number from 1 to 10 expected',
+    'targetBranches: list of strings expected',
+    'sandbox.hosts: list of strings expected',
+    'sandbox.off: true or false expected',
   ])
-  expect(fehlerVon({ checks: ['x'], targetBranches: ['main'], sandbox: [] })).toEqual([
-    'sandbox: Objekt erwartet',
+  expect(errorsOf({ checks: ['x'], targetBranches: ['main'], sandbox: [] })).toEqual([
+    'sandbox: object expected',
   ])
 })
 
-test('attempts außerhalb von 1 bis 10 oder keine ganze Zahl', () => {
+test('attempts outside 1 to 10 or not a whole number', () => {
   for (const attempts of [0, 11, 2.5]) {
-    expect(fehlerVon({ checks: ['x'], targetBranches: ['main'], attempts })).toEqual([
-      'attempts: ganze Zahl von 1 bis 10 erwartet',
+    expect(errorsOf({ checks: ['x'], targetBranches: ['main'], attempts })).toEqual([
+      'attempts: whole number from 1 to 10 expected',
     ])
   }
 })
 
-test('unbekannte Schlüssel, auch in sandbox', () => {
+test('unknown keys, also in sandbox', () => {
   expect(
-    fehlerVon({ checks: ['x'], targetBranches: ['main'], attempt: 3, sandbox: { host: [] } }),
-  ).toEqual(['unbekannter Schlüssel: attempt', 'unbekannter Schlüssel: sandbox.host'])
+    errorsOf({ checks: ['x'], targetBranches: ['main'], attempt: 3, sandbox: { host: [] } }),
+  ).toEqual(['unknown key: attempt', 'unknown key: sandbox.host'])
 })
 
-test('alle Fehler auf einmal', () => {
-  expect(fehlerVon({ checks: [], attempts: 0, sandbox: { off: 1 }, ziel: 'main' })).toEqual([
-    'checks: mindestens ein Eintrag nötig',
-    'attempts: ganze Zahl von 1 bis 10 erwartet',
-    'targetBranches fehlt',
-    'sandbox.off: true oder false erwartet',
-    'unbekannter Schlüssel: ziel',
+test('all errors at once', () => {
+  expect(errorsOf({ checks: [], attempts: 0, sandbox: { off: 1 }, target: 'main' })).toEqual([
+    'checks: at least one entry required',
+    'attempts: whole number from 1 to 10 expected',
+    'targetBranches is missing',
+    'sandbox.off: true or false expected',
+    'unknown key: target',
   ])
 })

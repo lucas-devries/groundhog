@@ -1,29 +1,29 @@
-import type { Uhr } from './clock.ts'
+import type { Clock } from './clock.ts'
 
-/** Frist für das zweite Strg+C. */
-const FRIST = 5_000
-export const HINWEIS = 'Nochmal Strg+C zum Abbrechen'
+/** Grace period for the second Ctrl+C. */
+const GRACE = 5_000
+export const NOTE = 'Press Ctrl+C again to abort'
 
 /**
- * Entscheidet über Signale des Prozesses: Das erste Strg+C zeigt nur den Hinweis, erst ein zweites
- * innerhalb der Frist bricht ab. SIGTERM und SIGHUP brechen sofort ab. Jedes Signal nach dem
- * Abbruch, also während des Aufräumens, beendet hart.
+ * Decides on the process's signals: the first Ctrl+C only shows the note, only a second one
+ * within the grace period aborts. SIGTERM and SIGHUP abort at once. Any signal after the abort,
+ * that is during cleanup, ends hard.
  */
-export function abbruchWaechter(optionen: {
-  uhr: Uhr
-  hinweis: (text: string) => void
-  hart: () => void
-}): { signal: AbortSignal; empfange: (signal: NodeJS.Signals) => void } {
-  const { uhr, hinweis, hart } = optionen
+export function abortGuard(options: {
+  clock: Clock
+  note: (text: string) => void
+  hard: () => void
+}): { signal: AbortSignal; receive: (signal: NodeJS.Signals) => void } {
+  const { clock, note, hard } = options
   const ac = new AbortController()
-  let erstes: number | undefined
+  let first: number | undefined
   return {
     signal: ac.signal,
-    empfange: (signal) => {
-      if (ac.signal.aborted) return hart()
-      if (signal === 'SIGINT' && (erstes === undefined || uhr.jetzt() - erstes > FRIST)) {
-        erstes = uhr.jetzt()
-        return hinweis(HINWEIS)
+    receive: (signal) => {
+      if (ac.signal.aborted) return hard()
+      if (signal === 'SIGINT' && (first === undefined || clock.now() - first > GRACE)) {
+        first = clock.now()
+        return note(NOTE)
       }
       ac.abort()
     },

@@ -1,4 +1,4 @@
 import { defineConfig } from 'vitest/config'
 
-// Nur src: tsc legt die Tests auch nach dist.
+// Only src: tsc puts the tests into dist too.
 export default defineConfig({ test: { include: ['src/**/*.test.ts'] } })

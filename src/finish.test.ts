@@ -1,156 +1,156 @@
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { type Auswahl, type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
+import { type AgentScript, fakeAgent } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { type Choice, driveRun, type Event, type RunResult } from './engine.ts'
 import { git } from './git.ts'
-import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { passthrough } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
-const ticket = (nummer: number, teil: Partial<Ticket> = {}): Ticket => ({
-  nummer,
-  offen: true,
+const ticket = (number: number, part: Partial<Ticket> = {}): Ticket => ({
+  number,
+  open: true,
   labels: ['ready-for-agent'],
   assignees: [],
-  blocker: [],
-  ...teil,
+  blockers: [],
+  ...part,
 })
 
-/** Ein Run, der das Ticket grün umsetzt. */
-const setztUm: AgentSkript = ({ verzeichnis, ticket }) => {
-  commitDatei(verzeichnis, `${ticket.nummer}.txt`, 'x', `Ticket ${ticket.nummer} umsetzen`)
-  return { erfolg: true }
+/** A session that implements the ticket green. */
+const implementsTicket: AgentScript = ({ directory, ticket }) => {
+  commitFile(directory, `${ticket.number}.txt`, 'x', `Implement ticket ${ticket.number}`)
+  return { success: true }
 }
 
-/** Fährt einen ganzen Lauf über Spec 1. */
-function lauf(
-  klon: string,
+/** Drives a whole run over spec 1. */
+function run(
+  clone: string,
   tracker: InMemoryTracker,
-  auswahl: Auswahl,
-  skript: AgentSkript[] = [setztUm, setztUm],
-  melde?: (e: Ereignis) => void,
-): Promise<LaufErgebnis> {
-  return fahreLauf({
+  choice: Choice,
+  script: AgentScript[] = [implementsTicket, implementsTicket],
+  report?: (e: Event) => void,
+): Promise<RunResult> {
+  return driveRun({
     spec: 1,
-    auswahl,
-    verzeichnis: klon,
+    choice,
+    directory: clone,
     checks: [],
     tracker,
-    agent: fakeAgent(skript),
-    sandbox: durchreiche,
-    uhr: steuerbareUhr(),
-    melde,
+    agent: fakeAgent(script),
+    sandbox: passthrough,
+    clock: manualClock(),
+    report,
   })
 }
 
-test('Mergen meldet den Push in den Ziel-Branch', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const ereignisse: Ereignis[] = []
+test('merge reports the push into the target branch', async () => {
+  const { remote, clone } = throwawayRepo()
+  const events: Event[] = []
 
-  await lauf(
-    klon,
-    new InMemoryTracker('ich', [ticket(2)]),
-    { zielBranch: 'main', abschluss: 'mergen' },
-    [setztUm],
-    (e) => ereignisse.push(e),
+  await run(
+    clone,
+    new InMemoryTracker('me', [ticket(2)]),
+    { targetBranch: 'main', finish: 'merge' },
+    [implementsTicket],
+    (e) => events.push(e),
   )
 
-  expect(ereignisse.filter((e) => e.art === 'push').at(-1)).toMatchObject({
+  expect(events.filter((e) => e.type === 'push').at(-1)).toMatchObject({
     branch: 'main',
     commit: git(remote, 'rev-parse', 'main'),
   })
 })
 
-test('Mergen: Merge-Commit des Integration-Branch in den Ziel-Branch, Push, Spec geschlossen', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2), ticket(3)])
+test('merge: merge commit of the integration branch into the target branch, push, spec closed', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2), ticket(3)])
 
-  const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'mergen' })
+  const result = await run(clone, tracker, { targetBranch: 'main', finish: 'merge' })
 
   const merge = git(remote, 'rev-parse', 'main')
-  expect(ergebnis.abschluss).toEqual({ art: 'gemergt', commit: merge })
+  expect(result.finish).toEqual({ type: 'merged', commit: merge })
   expect(git(remote, 'rev-parse', 'main^1')).toBe(git(remote, 'rev-parse', 'spec/1~2'))
   expect(git(remote, 'rev-parse', 'main^2')).toBe(git(remote, 'rev-parse', 'spec/1'))
-  expect(tracker.offen(1)).toBe(false)
+  expect(tracker.isOpen(1)).toBe(false)
 })
 
-test('Mergen mit Konflikt: Merge abgebrochen, Integration- und Ziel-Branch unverändert, Spec offen', async () => {
-  const { remote, klon, neuerKlon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2)])
+test('merge with conflict: merge aborted, integration and target branch unchanged, spec open', async () => {
+  const { remote, clone, newClone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
   let main = ''
 
-  const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'mergen' }, [
-    (auftrag) => {
-      const anderer = neuerKlon()
-      commitDatei(anderer, '2.txt', 'anders', 'derweil auf main')
-      git(anderer, 'push', '-q', 'origin', 'main')
-      main = git(anderer, 'rev-parse', 'HEAD')
-      return setztUm(auftrag)
+  const result = await run(clone, tracker, { targetBranch: 'main', finish: 'merge' }, [
+    (request) => {
+      const other = newClone()
+      commitFile(other, '2.txt', 'different', 'meanwhile on main')
+      git(other, 'push', '-q', 'origin', 'main')
+      main = git(other, 'rev-parse', 'HEAD')
+      return implementsTicket(request)
     },
   ])
 
-  expect(ergebnis.abschluss).toEqual({ art: 'konflikt' })
+  expect(result.finish).toEqual({ type: 'conflict' })
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
-  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
-  expect(git(klon, 'status', '--porcelain')).toBe('')
-  expect(git(klon, 'branch', '--show-current')).toBe('spec/1')
-  expect(tracker.offen(1)).toBe(true)
-  expect(tracker.kommentare(1).slice(0, -1)).toEqual([])
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+  expect(git(clone, 'status', '--porcelain')).toBe('')
+  expect(git(clone, 'branch', '--show-current')).toBe('spec/1')
+  expect(tracker.isOpen(1)).toBe(true)
+  expect(tracker.comments(1).slice(0, -1)).toEqual([])
 })
 
-test.each(['mergen', 'pr', 'nichts'] as const)(
-  '%s: sind nicht alle Tickets geschlossen, entfällt der Abschluss',
-  async (abschluss) => {
-    const { remote, klon } = wegwerfRepo()
-    const tracker = new InMemoryTracker('ich', [
+test.each(['merge', 'pr', 'none'] as const)(
+  '%s: if not all tickets are closed, the finish is skipped',
+  async (finish) => {
+    const { remote, clone } = throwawayRepo()
+    const tracker = new InMemoryTracker('me', [
       ticket(2),
       ticket(3, { labels: ['ready-for-human'] }),
     ])
     const main = git(remote, 'rev-parse', 'main')
 
-    const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss })
+    const result = await run(clone, tracker, { targetBranch: 'main', finish })
 
-    expect(ergebnis.abschluss).toEqual({ art: 'entfaellt', grund: 'Tickets offen' })
-    expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
+    expect(result.finish).toEqual({ type: 'skipped', reason: 'tickets open' })
+    expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
     expect(git(remote, 'rev-parse', 'main')).toBe(main)
     expect(tracker.prs).toEqual([])
-    expect(tracker.kommentare(1).slice(0, -1)).toEqual([])
-    expect(tracker.offen(1)).toBe(true)
+    expect(tracker.comments(1).slice(0, -1)).toEqual([])
+    expect(tracker.isOpen(1)).toBe(true)
   },
 )
 
-test('PR: vom Integration-Branch auf den Ziel-Branch mit Closes, Link an der Spec, Spec bleibt offen', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2)])
+test('PR: from the integration branch onto the target branch with Closes, link on the spec, spec stays open', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
   const main = git(remote, 'rev-parse', 'main')
 
-  const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'pr' })
+  const result = await run(clone, tracker, { targetBranch: 'main', finish: 'pr' })
 
   expect(tracker.prs).toEqual([
     {
       integrationBranch: 'spec/1',
-      zielBranch: 'main',
-      titel: expect.any(String),
+      targetBranch: 'main',
+      title: expect.any(String),
       body: 'Closes #1',
     },
   ])
   const url = 'https://github.example/pull/1'
-  expect(ergebnis.abschluss).toEqual({ art: 'pr', url })
-  expect(tracker.kommentare(1).slice(0, -1)).toEqual([`PR: ${url}`])
-  expect(tracker.offen(1)).toBe(true)
+  expect(result.finish).toEqual({ type: 'pr', url })
+  expect(tracker.comments(1).slice(0, -1)).toEqual([`PR: ${url}`])
+  expect(tracker.isOpen(1)).toBe(true)
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
 })
 
-test('Nichts: der Name des Integration-Branch steht an der Spec, sonst geschieht nichts', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2)])
+test('none: the name of the integration branch is on the spec, nothing else happens', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
   const main = git(remote, 'rev-parse', 'main')
 
-  const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'nichts' })
+  const result = await run(clone, tracker, { targetBranch: 'main', finish: 'none' })
 
-  expect(ergebnis.abschluss).toEqual({ art: 'nichts' })
-  expect(tracker.kommentare(1).slice(0, -1)).toEqual(['Integration-Branch: spec/1'])
+  expect(result.finish).toEqual({ type: 'none' })
+  expect(tracker.comments(1).slice(0, -1)).toEqual(['Integration branch: spec/1'])
   expect(tracker.prs).toEqual([])
-  expect(tracker.offen(1)).toBe(true)
+  expect(tracker.isOpen(1)).toBe(true)
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
 })

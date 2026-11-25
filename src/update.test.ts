@@ -1,23 +1,23 @@
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
-import { fakeGh, type GhAntwort } from './testing/fake-gh.ts'
-import { aktualisiere, neuereVersion } from './update.ts'
+import { fakeGh, type GhAnswer } from './testing/fake-gh.ts'
+import { newerVersion, update } from './update.ts'
 
 afterEach(() => vi.unstubAllEnvs())
 
-/** Fake-`gh` (eine Antwort auf die Tag-Abfrage) und Fake-`npm` allein im `PATH`. */
-function fakes(tags: GhAntwort, npmExit = 0) {
+/** Fake `gh` (one answer to the tag query) and fake `npm` alone in the `PATH`. */
+function fakes(tags: GhAnswer, npmExit = 0) {
   const fake = fakeGh([tags])
   writeFileSync(
-    join(fake.verzeichnis, 'npm'),
-    `#!/bin/sh\necho "$@" >> "${fake.verzeichnis}/npm.log"\nexit ${npmExit}\n`,
+    join(fake.directory, 'npm'),
+    `#!/bin/sh\necho "$@" >> "${fake.directory}/npm.log"\nexit ${npmExit}\n`,
   )
-  chmodSync(join(fake.verzeichnis, 'npm'), 0o755)
-  vi.stubEnv('PATH', `${fake.verzeichnis}:${dirname(process.execPath)}:/bin`)
+  chmodSync(join(fake.directory, 'npm'), 0o755)
+  vi.stubEnv('PATH', `${fake.directory}:${dirname(process.execPath)}:/bin`)
   const npm = () => {
     try {
-      return readFileSync(join(fake.verzeichnis, 'npm.log'), 'utf8').trim().split('\n')
+      return readFileSync(join(fake.directory, 'npm.log'), 'utf8').trim().split('\n')
     } catch {
       return []
     }
@@ -25,13 +25,13 @@ function fakes(tags: GhAntwort, npmExit = 0) {
   return { fake, npm }
 }
 
-const tags = (...namen: string[]): GhAntwort => ({ ausgabe: `${namen.join('\n')}\n` })
+const tags = (...names: string[]): GhAnswer => ({ output: `${names.join('\n')}\n` })
 
-test('der neueste SemVer-Tag ist die neuere Version, numerisch verglichen, andere Tags zählen nicht', () => {
+test('the newest SemVer tag is the newer version, compared numerically, other tags do not count', () => {
   const { fake } = fakes(tags('v0.9.0', 'v0.10.0', 'v0.2.0', 'nightly', 'v1.0.0-rc.1'))
 
-  expect(neuereVersion('0.9.3')).toBe('v0.10.0')
-  expect(fake.aufrufe()[0]?.args).toEqual([
+  expect(newerVersion('0.9.3')).toBe('v0.10.0')
+  expect(fake.calls()[0]?.args).toEqual([
     'api',
     '--paginate',
     'repos/lucas-devries/groundhog/tags',
@@ -41,53 +41,52 @@ test('der neueste SemVer-Tag ist die neuere Version, numerisch verglichen, ander
 })
 
 test.each([
-  ['gleich', '0.10.0'],
-  ['älter', '1.0.0'],
-])('ist der neueste Tag %s, gibt es keine neuere Version', (_, version) => {
+  ['the same', '0.10.0'],
+  ['older', '1.0.0'],
+])('if the newest tag is %s, there is no newer version', (_, version) => {
   fakes(tags('v0.10.0', 'v0.9.0'))
 
-  expect(neuereVersion(version)).toBeUndefined()
+  expect(newerVersion(version)).toBeUndefined()
 })
 
-test('ein gescheiterter Versionsvergleich (offline, Rate-Limit) bleibt stumm', () => {
-  fakes({ exitCode: 1, fehler: 'API rate limit exceeded' })
+test('a failed version comparison (offline, rate limit) stays silent', () => {
+  fakes({ exitCode: 1, error: 'API rate limit exceeded' })
 
-  expect(neuereVersion('0.1.0')).toBeUndefined()
+  expect(newerVersion('0.1.0')).toBeUndefined()
 })
 
-test('update installiert den neuesten Tag wie die Erstinstallation aus dem GitHub-Repo', () => {
+test('update installs the newest tag like the first install from the GitHub repo', () => {
   const { npm } = fakes(tags('v0.2.0', 'v0.3.0'))
 
-  expect(aktualisiere('0.2.0')).toEqual({
+  expect(update('0.2.0')).toEqual({
     exitCode: 0,
-    meldung: 'groundhog v0.3.0 ist installiert.',
+    message: 'groundhog v0.3.0 is installed.',
   })
   expect(npm()).toEqual(['install -g github:lucas-devries/groundhog#v0.3.0'])
 })
 
-test('update meldet, wenn die Version schon aktuell ist, und installiert nichts', () => {
+test('update reports when the version is already up to date and installs nothing', () => {
   const { npm } = fakes(tags('v0.3.0'))
 
-  expect(aktualisiere('0.3.0')).toEqual({ exitCode: 0, meldung: 'groundhog 0.3.0 ist aktuell.' })
+  expect(update('0.3.0')).toEqual({ exitCode: 0, message: 'groundhog 0.3.0 is up to date.' })
   expect(npm()).toEqual([])
 })
 
-test('update ohne Antwort von GitHub bricht mit Meldung ab', () => {
-  const { npm } = fakes({ exitCode: 1, fehler: 'dial tcp: no route to host' })
+test('update without an answer from GitHub aborts with a message', () => {
+  const { npm } = fakes({ exitCode: 1, error: 'dial tcp: no route to host' })
 
-  expect(aktualisiere('0.3.0')).toEqual({
+  expect(update('0.3.0')).toEqual({
     exitCode: 1,
-    meldung: 'Die neueste Version ließ sich nicht ermitteln: dial tcp: no route to host',
+    message: 'Could not determine the newest version: dial tcp: no route to host',
   })
   expect(npm()).toEqual([])
 })
 
-test('ein gescheitertes npm install meldet das Scheitern', () => {
+test('a failed npm install reports the failure', () => {
   fakes(tags('v0.4.0'), 1)
 
-  expect(aktualisiere('0.3.0')).toEqual({
+  expect(update('0.3.0')).toEqual({
     exitCode: 1,
-    meldung:
-      'Das Update auf v0.4.0 ist gescheitert (npm install -g github:lucas-devries/groundhog#v0.4.0).',
+    message: 'The update to v0.4.0 failed (npm install -g github:lucas-devries/groundhog#v0.4.0).',
   })
 })

@@ -1,92 +1,92 @@
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { Ereignis } from './engine.ts'
+import type { Event } from './engine.ts'
 import { git } from './git.ts'
 
-/** So viele Läufe bleiben pro Klon im Protokoll, der neue eingeschlossen. */
-const BEHALTEN = 10
+/** This many runs stay in the log per clone, the new one included. */
+const KEEP = 10
 
-export interface Protokoll {
-  /** Ordner des Laufs. */
-  pfad: string
-  /** Schreibt ein Ereignis der Engine ins Protokoll und reicht es weiter. */
-  melde: (ereignis: Ereignis) => void
+export interface Log {
+  /** Folder of the run. */
+  path: string
+  /** Writes an event of the engine to the log and passes it on. */
+  report: (event: Event) => void
 }
 
 /**
- * Legt den Ordner des Laufs unter `.git/groundhog/runs/` an und löscht Läufe über die
- * letzten 10 hinaus. Wirft, wenn der Ordner sich nicht anlegen lässt.
+ * Creates the run's folder under `.git/groundhog/runs/` and deletes runs beyond the last 10.
+ * Throws if the folder cannot be created.
  */
-export function oeffneProtokoll(optionen: {
-  /** Repo-Root des Klons. */
-  verzeichnis: string
+export function openLog(options: {
+  /** Repo root of the clone. */
+  directory: string
   spec: number
-  /** Startzeit des Laufs in ms; der Ordner trägt sie in lokaler Zeit. */
+  /** Start time of the run in ms; the folder carries it in local time. */
   start: number
-  /** Bekommt jedes Ereignis danach, dazu einmal eine Warnung, wenn ein Schreiben scheitert. */
-  weiter?: (ereignis: Ereignis) => void
-}): Protokoll {
-  const { verzeichnis, spec, start, weiter } = optionen
-  const gitDir = resolve(verzeichnis, git(verzeichnis, 'rev-parse', '--git-common-dir'))
-  const laeufe = join(gitDir, 'groundhog', 'runs')
-  const pfad = join(laeufe, `${zeitstempel(new Date(start))}-spec-${spec}`)
-  mkdirSync(laeufe, { recursive: true })
-  mkdirSync(pfad)
-  // Die Namen beginnen mit der Startzeit, sortieren also chronologisch.
-  for (const alt of readdirSync(laeufe).sort().slice(0, -BEHALTEN)) {
-    rmSync(join(laeufe, alt), { recursive: true, force: true })
+  /** Gets every event afterwards, plus a warning once if a write fails. */
+  next?: (event: Event) => void
+}): Log {
+  const { directory, spec, start, next } = options
+  const gitDir = resolve(directory, git(directory, 'rev-parse', '--git-common-dir'))
+  const runs = join(gitDir, 'groundhog', 'runs')
+  const path = join(runs, `${timestamp(new Date(start))}-spec-${spec}`)
+  mkdirSync(runs, { recursive: true })
+  mkdirSync(path)
+  // The names start with the start time, so they sort chronologically.
+  for (const old of readdirSync(runs).sort().slice(0, -KEEP)) {
+    rmSync(join(runs, old), { recursive: true, force: true })
   }
 
-  // Die Checks laufen nach dem zuletzt beendeten Run.
-  let letzterRun = ''
-  let gewarnt = false
-  const schreibe = (datei: string, text: string, zeit: number) => {
+  // The checks run after the session that finished last.
+  let lastSession = ''
+  let warned = false
+  const write = (file: string, text: string, time: number) => {
     try {
-      appendFileSync(join(pfad, datei), text)
-    } catch (fehler) {
-      if (gewarnt) return
-      gewarnt = true
-      weiter?.({
-        art: 'warnung',
-        text: `Protokoll unvollständig, Schreiben in ${pfad} gescheitert: ${(fehler as Error).message}`,
-        zeit,
+      appendFileSync(join(path, file), text)
+    } catch (error) {
+      if (warned) return
+      warned = true
+      next?.({
+        type: 'warning',
+        text: `Log incomplete, writing to ${path} failed: ${(error as Error).message}`,
+        time,
       })
     }
   }
-  const protokolliere = (e: Ereignis) => {
-    if (e.art === 'run-ausgabe') {
-      schreibe(`ticket-${e.ticket}-session-${e.run}.jsonl`, `${e.zeile}\n`, e.zeit)
+  const log = (e: Event) => {
+    if (e.type === 'session-output') {
+      write(`ticket-${e.ticket}-session-${e.session}.jsonl`, `${e.line}\n`, e.time)
       return
     }
-    if (e.art === 'run-beendet') letzterRun = `ticket-${e.ticket}-session-${e.run}`
-    if (e.art === 'pruefung' && e.ausgabe !== undefined) {
-      const { ausgabe, befehl, ...ohneAusgabe } = e
-      const text = `$ ${befehl}\n${ausgabe}${ausgabe.endsWith('\n') ? '' : '\n'}`
-      schreibe(`${letzterRun}-checks.log`, text, e.zeit)
-      e = ohneAusgabe
+    if (e.type === 'session-finished') lastSession = `ticket-${e.ticket}-session-${e.session}`
+    if (e.type === 'verification' && e.output !== undefined) {
+      const { output, command, ...withoutOutput } = e
+      const text = `$ ${command}\n${output}${output.endsWith('\n') ? '' : '\n'}`
+      write(`${lastSession}-checks.log`, text, e.time)
+      e = withoutOutput
     }
-    if (e.art === 'lauf-beendet') {
-      const { uebersicht, ...ohneUebersicht } = e
-      schreibe('summary.md', `${uebersicht}\n`, e.zeit)
-      e = ohneUebersicht as Ereignis
+    if (e.type === 'run-finished') {
+      const { summary, ...withoutSummary } = e
+      write('summary.md', `${summary}\n`, e.time)
+      e = withoutSummary as Event
     }
-    schreibe('run.jsonl', `${JSON.stringify(e)}\n`, e.zeit)
+    write('run.jsonl', `${JSON.stringify(e)}\n`, e.time)
   }
 
   return {
-    pfad,
-    melde: (e) => {
-      protokolliere(e)
-      weiter?.(e)
+    path,
+    report: (e) => {
+      log(e)
+      next?.(e)
     },
   }
 }
 
-/** JJJJMMTT-HHMMSS in lokaler Zeit. */
-function zeitstempel(d: Date): string {
-  const zwei = (n: number) => String(n).padStart(2, '0')
+/** YYYYMMDD-HHMMSS in local time. */
+function timestamp(d: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0')
   return (
-    `${d.getFullYear()}${zwei(d.getMonth() + 1)}${zwei(d.getDate())}-` +
-    `${zwei(d.getHours())}${zwei(d.getMinutes())}${zwei(d.getSeconds())}`
+    `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-` +
+    `${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`
   )
 }

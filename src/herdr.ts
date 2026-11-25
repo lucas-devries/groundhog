@@ -1,28 +1,27 @@
-import type { Ereignis } from './engine.ts'
+import type { Event } from './engine.ts'
 
 /**
- * Meldet den Lauf per OSC 7501 als Agent `groundhog` an Herdr. Liefert zu jedem Ereignis die
- * Sequenz, die auf stdout gehört, oder nichts. Eine Funktion pro Lauf, mit allen Ereignissen in
- * Reihenfolge füttern.
+ * Reports the run to Herdr via OSC 7501 as agent `groundhog`. Returns for each event the
+ * sequence that belongs on stdout, or nothing. One function per run, fed with all events in
+ * order.
  */
 export function herdr(
-  umgebung: { HC_TERMINAL_ID?: string },
-  istTerminal: boolean,
-): (e: Ereignis) => string | undefined {
-  if (!umgebung.HC_TERMINAL_ID || !istTerminal) return () => undefined
+  env: { HC_TERMINAL_ID?: string },
+  isTerminal: boolean,
+): (e: Event) => string | undefined {
+  if (!env.HC_TERMINAL_ID || !isTerminal) return () => undefined
   let spec = 0
   let progress = 0
-  let gescheitert = false
+  let failed = false
   return (e) => {
-    if (e.art === 'lauf-begonnen') spec = e.spec
-    if (e.art === 'ticket-gescheitert') gescheitert = true
-    if (e.art === 'task-graph') {
-      const zu = e.tickets.filter((t) => !t.offen).length
-      progress = e.tickets.length ? Math.round((zu / e.tickets.length) * 100) : 100
+    if (e.type === 'run-started') spec = e.spec
+    if (e.type === 'ticket-failed') failed = true
+    if (e.type === 'task-graph') {
+      const closed = e.tickets.filter((t) => !t.open).length
+      progress = e.tickets.length ? Math.round((closed / e.tickets.length) * 100) : 100
     }
-    if (e.art === 'ticket-genommen') return osc('working', `Ticket #${e.ticket}`, progress)
-    if (e.art === 'lauf-beendet')
-      return osc(gescheitert ? 'error' : 'done', `Spec #${spec}`, progress)
+    if (e.type === 'ticket-taken') return osc('working', `Ticket #${e.ticket}`, progress)
+    if (e.type === 'run-finished') return osc(failed ? 'error' : 'done', `Spec #${spec}`, progress)
     return undefined
   }
 }

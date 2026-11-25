@@ -1,149 +1,149 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { type Ereignis, fahreLauf } from './engine.ts'
-import { oeffneProtokoll } from './log.ts'
-import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { type AgentScript, fakeAgent } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { driveRun, type Event } from './engine.ts'
+import { openLog } from './log.ts'
+import { passthrough } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 const START = new Date(2026, 10, 25, 3, 4, 5).getTime()
 
-/** Fährt einen Lauf über Spec 1 mit Protokoll; liefert dessen Pfad. */
-async function lauf(
-  klon: string,
-  skript: AgentSkript[],
-  optionen: {
+/** Drives a run over spec 1 with a log; returns its path. */
+async function run(
+  clone: string,
+  script: AgentScript[],
+  options: {
     checks?: string[]
     token?: string
-    weiter?: (e: Ereignis) => void
-    /** Läuft zwischen dem Öffnen des Protokolls und dem Lauf. */
-    nachOeffnen?: (pfad: string) => void
+    next?: (e: Event) => void
+    /** Runs between opening the log and the run. */
+    afterOpen?: (path: string) => void
   } = {},
 ): Promise<string> {
-  const { checks = ['true'], token, weiter } = optionen
-  const protokoll = oeffneProtokoll({ verzeichnis: klon, spec: 1, start: START, weiter })
-  optionen.nachOeffnen?.(protokoll.pfad)
-  await fahreLauf({
+  const { checks = ['true'], token, next } = options
+  const log = openLog({ directory: clone, spec: 1, start: START, next })
+  options.afterOpen?.(log.path)
+  await driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis: klon,
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory: clone,
     checks,
     token,
-    versionen: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
-    tracker: new InMemoryTracker('ich', [
-      { nummer: 2, offen: true, labels: ['ready-for-agent'], assignees: [], blocker: [] },
+    versions: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
+    tracker: new InMemoryTracker('me', [
+      { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },
     ]),
-    agent: fakeAgent(skript),
-    sandbox: durchreiche,
-    uhr: steuerbareUhr(START),
-    melde: protokoll.melde,
+    agent: fakeAgent(script),
+    sandbox: passthrough,
+    clock: manualClock(START),
+    report: log.report,
   })
-  return protokoll.pfad
+  return log.path
 }
 
-const commitet: AgentSkript = ({ verzeichnis }) => {
-  commitDatei(verzeichnis, 'a.txt', 'a', 'Ticket 2 umsetzen')
-  return { erfolg: true, tokens: { input_tokens: 10, output_tokens: 5 }, kostenUsd: 0.25 }
+const commits: AgentScript = ({ directory }) => {
+  commitFile(directory, 'a.txt', 'a', 'Implement ticket 2')
+  return { success: true, tokens: { input_tokens: 10, output_tokens: 5 }, costUsd: 0.25 }
 }
 
-const zeilen = (datei: string): Ereignis[] =>
-  readFileSync(datei, 'utf8')
+const lines = (file: string): Event[] =>
+  readFileSync(file, 'utf8')
     .trimEnd()
     .split('\n')
-    .map((z) => JSON.parse(z))
+    .map((l) => JSON.parse(l))
 
-test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner des Laufs', async () => {
-  const { klon } = wegwerfRepo()
+test('run.jsonl records every event of the engine as one line, in the run folder', async () => {
+  const { clone } = throwawayRepo()
 
-  const pfad = await lauf(klon, [commitet])
+  const path = await run(clone, [commits])
 
-  expect(pfad).toBe(join(klon, '.git/groundhog/runs/20261125-030405-spec-1'))
-  const ereignisse = zeilen(join(pfad, 'run.jsonl'))
-  expect(ereignisse.map((e) => e.art)).toEqual([
-    'lauf-begonnen',
+  expect(path).toBe(join(clone, '.git/groundhog/runs/20261125-030405-spec-1'))
+  const events = lines(join(path, 'run.jsonl'))
+  expect(events.map((e) => e.type)).toEqual([
+    'run-started',
     'task-graph',
-    'ticket-genommen',
-    'versuch-begonnen',
-    'run-beendet',
-    'pruefung',
-    'pruefung',
-    'pruefung',
-    'pruefung',
-    'pruefung',
-    'versuch-beendet',
+    'ticket-taken',
+    'attempt-started',
+    'session-finished',
+    'verification',
+    'verification',
+    'verification',
+    'verification',
+    'verification',
+    'attempt-finished',
     'push',
-    'ticket-erledigt',
+    'ticket-done',
     'task-graph',
-    'lauf-beendet',
+    'run-finished',
   ])
-  expect(ereignisse.find((e) => e.art === 'versuch-beendet')).toEqual({
-    art: 'versuch-beendet',
+  expect(events.find((e) => e.type === 'attempt-finished')).toEqual({
+    type: 'attempt-finished',
     ticket: 2,
-    versuch: 1,
-    pruefungen: [
-      { name: 'Run erfolgreich', ok: true },
-      { name: 'HEAD auf ticket/2', ok: true },
-      { name: 'neuer Commit seit Fixpunkt', ok: true },
-      { name: 'Arbeitsverzeichnis sauber', ok: true },
+    attempt: 1,
+    verifications: [
+      { name: 'Session successful', ok: true },
+      { name: 'HEAD on ticket/2', ok: true },
+      { name: 'new commit since fork point', ok: true },
+      { name: 'working tree clean', ok: true },
       { name: 'Check: true', ok: true },
     ],
-    zeit: START,
+    time: START,
   })
-  expect(ereignisse[0]).toMatchObject({
+  expect(events[0]).toMatchObject({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    versionen: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
+    choice: { targetBranch: 'main', finish: 'none' },
+    versions: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
   })
-  expect(ereignisse[4]).toMatchObject({
+  expect(events[4]).toMatchObject({
     ticket: 2,
-    run: 1,
-    versuch: 1,
-    erfolg: true,
+    session: 1,
+    attempt: 1,
+    success: true,
     tokens: { input_tokens: 10, output_tokens: 5 },
-    kostenUsd: 0.25,
+    costUsd: 0.25,
   })
-  expect(ereignisse[11]).toMatchObject({ branch: 'spec/1' })
-  expect(ereignisse[14]).toEqual({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, zeit: START })
+  expect(events[11]).toMatchObject({ branch: 'spec/1' })
+  expect(events[14]).toEqual({ type: 'run-finished', finish: { type: 'none' }, time: START })
 })
 
-test('die Übersicht liegt als summary.md im Ordner des Laufs, wie die Engine sie meldet', async () => {
-  const { klon } = wegwerfRepo()
-  let gemeldet = ''
+test('the summary lies in the run folder as summary.md, as the engine reports it', async () => {
+  const { clone } = throwawayRepo()
+  let reported = ''
 
-  const pfad = await lauf(klon, [commitet], {
-    weiter: (e) => {
-      if (e.art === 'lauf-beendet') gemeldet = e.uebersicht
+  const path = await run(clone, [commits], {
+    next: (e) => {
+      if (e.type === 'run-finished') reported = e.summary
     },
   })
 
-  expect(readFileSync(join(pfad, 'summary.md'), 'utf8')).toBe(`${gemeldet}\n`)
-  expect(gemeldet).toMatch(/^# Übersicht Spec #1\n/)
+  expect(readFileSync(join(path, 'summary.md'), 'utf8')).toBe(`${reported}\n`)
+  expect(reported).toMatch(/^# Summary of spec #1\n/)
 })
 
-test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks danach', async () => {
-  const { klon } = wegwerfRepo()
+test('each session has its raw output and the untruncated output of the checks after it', async () => {
+  const { clone } = throwawayRepo()
 
-  const pfad = await lauf(
-    klon,
+  const path = await run(
+    clone,
     [
-      (auftrag) => {
-        auftrag.ausgabe('{"type":"system","subtype":"init"}')
-        auftrag.ausgabe('{"type":"result","subtype":"success"}')
-        return commitet(auftrag)
+      (request) => {
+        request.output('{"type":"system","subtype":"init"}')
+        request.output('{"type":"result","subtype":"success"}')
+        return commits(request)
       },
-      (auftrag) => {
-        auftrag.ausgabe('{"type":"result","subtype":"success"}')
-        commitDatei(auftrag.verzeichnis, 'gruen', '', 'grün machen')
-        return { erfolg: true }
+      (request) => {
+        request.output('{"type":"result","subtype":"success"}')
+        commitFile(request.directory, 'green', '', 'make it green')
+        return { success: true }
       },
     ],
-    { checks: ['echo vorher', 'test -f gruen || { seq 0 149 | sed "s/^/zeile /"; false; }'] },
+    { checks: ['echo before', 'test -f green || { seq 0 149 | sed "s/^/line /"; false; }'] },
   )
 
-  expect(readdirSync(pfad).sort()).toEqual([
+  expect(readdirSync(path).sort()).toEqual([
     'run.jsonl',
     'summary.md',
     'ticket-2-session-1-checks.log',
@@ -151,90 +151,90 @@ test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks da
     'ticket-2-session-2-checks.log',
     'ticket-2-session-2.jsonl',
   ])
-  expect(readFileSync(join(pfad, 'ticket-2-session-1.jsonl'), 'utf8')).toBe(
+  expect(readFileSync(join(path, 'ticket-2-session-1.jsonl'), 'utf8')).toBe(
     '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n',
   )
-  const checks1 = readFileSync(join(pfad, 'ticket-2-session-1-checks.log'), 'utf8')
-  expect(checks1).toContain('$ echo vorher\nvorher\n')
-  expect(checks1).toContain('zeile 0\n')
-  expect(checks1).toContain('zeile 149')
-  expect(readFileSync(join(pfad, 'ticket-2-session-2-checks.log'), 'utf8')).not.toContain(
-    'zeile 0\n',
+  const checks1 = readFileSync(join(path, 'ticket-2-session-1-checks.log'), 'utf8')
+  expect(checks1).toContain('$ echo before\nbefore\n')
+  expect(checks1).toContain('line 0\n')
+  expect(checks1).toContain('line 149')
+  expect(readFileSync(join(path, 'ticket-2-session-2-checks.log'), 'utf8')).not.toContain(
+    'line 0\n',
   )
-  const ereignisse = zeilen(join(pfad, 'run.jsonl'))
-  expect(ereignisse.filter((e) => e.art === 'run-beendet')).toMatchObject([
-    { run: 1, versuch: 1 },
-    { run: 2, versuch: 2 },
+  const events = lines(join(path, 'run.jsonl'))
+  expect(events.filter((e) => e.type === 'session-finished')).toMatchObject([
+    { session: 1, attempt: 1 },
+    { session: 2, attempt: 2 },
   ])
-  // Rohe Ausgaben stehen nur in den eigenen Dateien.
-  expect(ereignisse.some((e) => e.art === 'run-ausgabe')).toBe(false)
-  expect(JSON.stringify(ereignisse)).not.toContain('zeile 0')
+  // Raw outputs only appear in their own files.
+  expect(events.some((e) => e.type === 'session-output')).toBe(false)
+  expect(JSON.stringify(events)).not.toContain('line 0')
 })
 
-test('das gh-Token erscheint weder im Protokoll noch in der Rückmeldung an den nächsten Run', async () => {
-  const { klon } = wegwerfRepo()
-  let rueckmeldung: string | undefined
-  let zurueck: string | undefined
+test('the gh token appears neither in the log nor in the feedback to the next session', async () => {
+  const { clone } = throwawayRepo()
+  let feedback: string | undefined
+  let returned: string | undefined
 
-  const pfad = await lauf(
-    klon,
+  const path = await run(
+    clone,
     [
-      (auftrag) => {
-        // Der Adapter wertet nur die gefilterte Zeile aus, etwa für die Blocks.
-        zurueck = auftrag.ausgabe('{"text":"GH_TOKEN=ghp_geheim"}')
-        return commitet(auftrag)
+      (request) => {
+        // The adapter only evaluates the filtered line, for example for the blocks.
+        returned = request.output('{"text":"GH_TOKEN=ghp_secret"}')
+        return commits(request)
       },
-      (auftrag) => {
-        rueckmeldung = auftrag.rueckmeldung
-        commitDatei(auftrag.verzeichnis, 'gruen', '', 'grün machen')
-        return { erfolg: true }
+      (request) => {
+        feedback = request.feedback
+        commitFile(request.directory, 'green', '', 'make it green')
+        return { success: true }
       },
     ],
-    { checks: ['echo token ghp_$(echo geheim); test -f gruen'], token: 'ghp_geheim' },
+    { checks: ['echo token ghp_$(echo secret); test -f green'], token: 'ghp_secret' },
   )
 
-  const alles = readdirSync(pfad)
-    .map((d) => readFileSync(join(pfad, d), 'utf8'))
+  const everything = readdirSync(path)
+    .map((d) => readFileSync(join(path, d), 'utf8'))
     .join('\n')
-  expect(alles).not.toContain('ghp_geheim')
-  expect(zurueck).toBe('{"text":"GH_TOKEN=***"}')
-  expect(readFileSync(join(pfad, 'ticket-2-session-1.jsonl'), 'utf8')).toContain('GH_TOKEN=***')
-  expect(readFileSync(join(pfad, 'ticket-2-session-1-checks.log'), 'utf8')).toContain('token ***')
-  expect(rueckmeldung).toContain('token ***')
-  expect(rueckmeldung).not.toContain('ghp_geheim')
+  expect(everything).not.toContain('ghp_secret')
+  expect(returned).toBe('{"text":"GH_TOKEN=***"}')
+  expect(readFileSync(join(path, 'ticket-2-session-1.jsonl'), 'utf8')).toContain('GH_TOKEN=***')
+  expect(readFileSync(join(path, 'ticket-2-session-1-checks.log'), 'utf8')).toContain('token ***')
+  expect(feedback).toContain('token ***')
+  expect(feedback).not.toContain('ghp_secret')
 })
 
-test('die letzten 10 Läufe bleiben, ältere löscht der Start des nächsten', async () => {
-  const { klon } = wegwerfRepo()
-  const laeufe = join(klon, '.git/groundhog/runs')
-  const alte = Array.from({ length: 10 }, (_, i) => `202611${10 + i}-120000-spec-${i}`)
-  for (const alt of alte) mkdirSync(join(laeufe, alt), { recursive: true })
+test('the last 10 runs stay, the start of the next one deletes older ones', async () => {
+  const { clone } = throwawayRepo()
+  const runs = join(clone, '.git/groundhog/runs')
+  const old = Array.from({ length: 10 }, (_, i) => `202611${10 + i}-120000-spec-${i}`)
+  for (const o of old) mkdirSync(join(runs, o), { recursive: true })
 
-  await lauf(klon, [commitet])
+  await run(clone, [commits])
 
-  expect(readdirSync(laeufe).sort()).toEqual([...alte.slice(1), '20261125-030405-spec-1'])
+  expect(readdirSync(runs).sort()).toEqual([...old.slice(1), '20261125-030405-spec-1'])
 })
 
-test('scheitert ein Schreiben, gibt es eine einzige Warnung, und der Lauf geht weiter', async () => {
-  const { klon } = wegwerfRepo()
-  const ereignisse: Ereignis[] = []
+test('if a write fails, there is a single warning and the run goes on', async () => {
+  const { clone } = throwawayRepo()
+  const events: Event[] = []
 
-  await lauf(klon, [commitet], {
-    weiter: (e) => ereignisse.push(e),
-    nachOeffnen: (pfad) => {
-      rmSync(pfad, { recursive: true })
-      writeFileSync(pfad, 'kein Ordner')
+  await run(clone, [commits], {
+    next: (e) => events.push(e),
+    afterOpen: (path) => {
+      rmSync(path, { recursive: true })
+      writeFileSync(path, 'not a folder')
     },
   })
 
-  expect(ereignisse.filter((e) => e.art === 'warnung')).toHaveLength(1)
-  expect(ereignisse.map((e) => e.art)).toContain('ticket-erledigt')
-  expect(ereignisse.at(-1)?.art).toBe('lauf-beendet')
+  expect(events.filter((e) => e.type === 'warning')).toHaveLength(1)
+  expect(events.map((e) => e.type)).toContain('ticket-done')
+  expect(events.at(-1)?.type).toBe('run-finished')
 })
 
-test('lässt sich der Ordner des Laufs nicht anlegen, bricht der Start ab', () => {
-  const { klon } = wegwerfRepo()
-  writeFileSync(join(klon, '.git/groundhog'), 'kein Ordner')
+test('if the run folder cannot be created, the start aborts', () => {
+  const { clone } = throwawayRepo()
+  writeFileSync(join(clone, '.git/groundhog'), 'not a folder')
 
-  expect(() => oeffneProtokoll({ verzeichnis: klon, spec: 1, start: START })).toThrow()
+  expect(() => openLog({ directory: clone, spec: 1, start: START })).toThrow()
 })

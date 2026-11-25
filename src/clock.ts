@@ -1,42 +1,42 @@
-import { setTimeout as schlafe } from 'node:timers/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 
-/** Die Uhr der Engine. Dahinter: Systemzeit, steuerbare Uhr. */
-export interface Uhr {
-  /** Millisekunden seit der Epoche. */
-  jetzt(): number
-  /** Wartet `ms` Millisekunden; ein Abbruch über `signal` beendet das Warten vorzeitig. */
-  warte(ms: number, signal?: AbortSignal): Promise<void>
-  /** Ein Signal, das nach `ms` Millisekunden abbricht. */
-  zeitlimit(ms: number): AbortSignal
+/** The engine's clock. Behind it: system time, manual clock. */
+export interface Clock {
+  /** Milliseconds since the epoch. */
+  now(): number
+  /** Waits `ms` milliseconds; an abort via `signal` ends the wait early. */
+  wait(ms: number, signal?: AbortSignal): Promise<void>
+  /** A signal that aborts after `ms` milliseconds. */
+  timeout(ms: number): AbortSignal
 }
 
-export const systemUhr: Uhr = {
-  jetzt: () => Date.now(),
-  warte: (ms, signal) => schlafe(ms, undefined, { signal }).catch(() => {}),
-  zeitlimit: (ms) => {
+export const systemClock: Clock = {
+  now: () => Date.now(),
+  wait: (ms, signal) => sleep(ms, undefined, { signal }).catch(() => {}),
+  timeout: (ms) => {
     const ac = new AbortController()
-    // unref: Ein längst beendeter Run hält den Prozess nicht bis zum Zeitlimit am Leben.
+    // unref: a session that ended long ago doesn't keep the process alive until the time limit.
     setTimeout(() => ac.abort(), ms).unref()
     return ac.signal
   },
 }
 
-/** Uhr für Tests: steht still, bis sie vorgestellt wird; `warte` stellt sie sofort vor. */
-export function steuerbareUhr(start = 0): Uhr & { vorstellen(ms: number): void } {
-  let zeit = start
-  let wecker: { um: number; ac: AbortController }[] = []
-  const vorstellen = (ms: number) => {
-    zeit += ms
-    for (const w of wecker) if (w.um <= zeit) w.ac.abort()
-    wecker = wecker.filter((w) => w.um > zeit)
+/** Clock for tests: stands still until it is advanced; `wait` advances it at once. */
+export function manualClock(start = 0): Clock & { advance(ms: number): void } {
+  let time = start
+  let alarms: { at: number; ac: AbortController }[] = []
+  const advance = (ms: number) => {
+    time += ms
+    for (const a of alarms) if (a.at <= time) a.ac.abort()
+    alarms = alarms.filter((a) => a.at > time)
   }
   return {
-    jetzt: () => zeit,
-    vorstellen,
-    warte: async (ms) => vorstellen(ms),
-    zeitlimit: (ms) => {
+    now: () => time,
+    advance,
+    wait: async (ms) => advance(ms),
+    timeout: (ms) => {
       const ac = new AbortController()
-      wecker.push({ um: zeit + ms, ac })
+      alarms.push({ at: time + ms, ac })
       return ac.signal
     },
   }

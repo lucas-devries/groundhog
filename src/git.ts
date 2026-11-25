@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process'
 
 /**
- * Führt `git` im Verzeichnis aus und liefert stdout ohne Leerraum am Ende. Wirft bei Exit ≠ 0.
- * Läuft in eigener Prozessgruppe (ohne Terminal): Das erste Strg+C bricht nichts ab, also darf es
- * auch `git` nicht treffen.
+ * Runs `git` in the directory and returns stdout without trailing whitespace. Throws on exit ≠ 0.
+ * Runs in its own process group (without a terminal): the first Ctrl+C aborts nothing, so it must
+ * not hit `git` either.
  */
-export function git(verzeichnis: string, ...args: string[]): string {
-  // Node beachtet `detached` auch synchron; nur die Typen kennen es dort nicht.
-  const optionen = { cwd: verzeichnis, encoding: 'utf8', stdio: 'pipe', detached: true } as const
-  return execFileSync('git', args, optionen).trimEnd()
+export function git(directory: string, ...args: string[]): string {
+  // Node honours `detached` for the sync variant too; only the types don't know it there.
+  const options = { cwd: directory, encoding: 'utf8', stdio: 'pipe', detached: true } as const
+  return execFileSync('git', args, options).trimEnd()
 }

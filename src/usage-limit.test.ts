@@ -1,223 +1,223 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { type Ereignis, fahreLauf, type LaufErgebnis } from './engine.ts'
-import { durchreiche, type Sandbox } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { type AgentScript, fakeAgent } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { driveRun, type Event, type RunResult } from './engine.ts'
+import { passthrough, type Sandbox } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 const MINUTE = 60_000
-const PUFFER = MINUTE
+const BUFFER = MINUTE
 
-/** Fährt einen Lauf über Spec 1 mit einem Ticket #2, ohne Angabe mit einem Versuch. */
-async function lauf(
-  skript: AgentSkript[],
-  optionen: {
-    erschoepftBis?: () => number | undefined
-    uhr?: ReturnType<typeof steuerbareUhr>
-    versuche?: number
+/** Drives a run over spec 1 with one ticket #2, by default with one attempt. */
+async function run(
+  script: AgentScript[],
+  options: {
+    exhaustedUntil?: () => number | undefined
+    clock?: ReturnType<typeof manualClock>
+    attempts?: number
     checks?: string[]
     sandbox?: Sandbox
   } = {},
 ) {
-  const { klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [
-    { nummer: 2, offen: true, labels: ['ready-for-agent'], assignees: [], blocker: [] },
+  const { clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [
+    { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },
   ])
-  const uhr = optionen.uhr ?? steuerbareUhr()
-  const ereignisse: Ereignis[] = []
-  const ergebnis: LaufErgebnis = await fahreLauf({
+  const clock = options.clock ?? manualClock()
+  const events: Event[] = []
+  const result: RunResult = await driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis: klon,
-    checks: optionen.checks ?? ['true'],
-    maxVersuche: optionen.versuche ?? 1,
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory: clone,
+    checks: options.checks ?? ['true'],
+    maxAttempts: options.attempts ?? 1,
     tracker,
-    agent: fakeAgent(skript, optionen.erschoepftBis),
-    sandbox: optionen.sandbox ?? durchreiche,
-    uhr,
-    melde: (e) => ereignisse.push(e),
+    agent: fakeAgent(script, options.exhaustedUntil),
+    sandbox: options.sandbox ?? passthrough,
+    clock,
+    report: (e) => events.push(e),
   })
-  return { ergebnis, ereignisse, tracker, klon, uhr }
+  return { result, events, tracker, clone, clock }
 }
 
-const commitet: AgentSkript = ({ verzeichnis }) => {
-  commitDatei(verzeichnis, 'a.txt', 'a', 'Ticket 2 umsetzen')
-  return { erfolg: true }
+const commits: AgentScript = ({ directory }) => {
+  commitFile(directory, 'a.txt', 'a', 'Implement ticket 2')
+  return { success: true }
 }
 
-test('am Usage-Limit wartet die Engine bis zum Reset plus Puffer und startet denselben Versuch neu', async () => {
-  const uhr = steuerbareUhr(1_000)
+test('at the usage limit the engine waits until the reset plus buffer and restarts the same attempt', async () => {
+  const clock = manualClock(1_000)
   const reset = 3 * 60 * MINUTE
-  let imZweitenRun: unknown
+  let inSecondSession: unknown
 
-  const { ereignisse, tracker } = await lauf(
+  const { events, tracker } = await run(
     [
-      ({ verzeichnis }) => {
-        writeFileSync(join(verzeichnis, 'a.txt'), 'x')
-        return { erfolg: false, usageLimit: reset }
+      ({ directory }) => {
+        writeFileSync(join(directory, 'a.txt'), 'x')
+        return { success: false, usageLimit: reset }
       },
-      (auftrag) => {
-        imZweitenRun = {
-          zeit: uhr.jetzt(),
-          halbfertig: existsSync(join(auftrag.verzeichnis, 'a.txt')),
-          rueckmeldung: auftrag.rueckmeldung,
+      (request) => {
+        inSecondSession = {
+          time: clock.now(),
+          halfDone: existsSync(join(request.directory, 'a.txt')),
+          feedback: request.feedback,
         }
-        return commitet(auftrag)
+        return commits(request)
       },
     ],
-    { uhr },
+    { clock },
   )
 
-  expect(imZweitenRun).toEqual({ zeit: reset + PUFFER, halbfertig: true, rueckmeldung: undefined })
-  expect(tracker.ticket(2).offen).toBe(false)
-  expect(ereignisse.filter((e) => e.art === 'versuch-begonnen')).toHaveLength(1)
-  expect(ereignisse.filter((e) => e.art === 'pause')).toEqual([
-    { art: 'pause', ticket: 2, reset, zeit: 1_000 },
+  expect(inSecondSession).toEqual({ time: reset + BUFFER, halfDone: true, feedback: undefined })
+  expect(tracker.ticket(2).open).toBe(false)
+  expect(events.filter((e) => e.type === 'attempt-started')).toHaveLength(1)
+  expect(events.filter((e) => e.type === 'pause')).toEqual([
+    { type: 'pause', ticket: 2, reset, time: 1_000 },
   ])
-  // Der Neustart ist ein eigener Run (eigene Rohdatei im Protokoll), aber derselbe Versuch.
-  expect(ereignisse.filter((e) => e.art === 'run-beendet')).toMatchObject([
-    { run: 1, versuch: 1, usageLimit: reset },
-    { run: 2, versuch: 1 },
+  // The restart is a session of its own (own raw file in the log), but the same attempt.
+  expect(events.filter((e) => e.type === 'session-finished')).toMatchObject([
+    { session: 1, attempt: 1, usageLimit: reset },
+    { session: 2, attempt: 1 },
   ])
 })
 
-test('ist vor dem Neustart noch ein Fenster erschöpft, wartet die Engine bis zu dessen Reset', async () => {
-  const uhr = steuerbareUhr()
-  const ersterReset = 60 * MINUTE
-  const zweiterReset = 24 * 60 * MINUTE
-  const abfragen: number[] = []
-  let startZweiterRun: number | undefined
+test('if a window is still exhausted before the restart, the engine waits until its reset', async () => {
+  const clock = manualClock()
+  const firstReset = 60 * MINUTE
+  const secondReset = 24 * 60 * MINUTE
+  const queries: number[] = []
+  let startSecondSession: number | undefined
 
-  const { ereignisse } = await lauf(
+  const { events } = await run(
     [
-      () => ({ erfolg: false, usageLimit: ersterReset }),
-      (auftrag) => {
-        startZweiterRun = uhr.jetzt()
-        return commitet(auftrag)
+      () => ({ success: false, usageLimit: firstReset }),
+      (request) => {
+        startSecondSession = clock.now()
+        return commits(request)
       },
     ],
     {
-      uhr,
-      erschoepftBis: () => {
-        abfragen.push(uhr.jetzt())
-        return abfragen.length === 1 ? zweiterReset : undefined
+      clock,
+      exhaustedUntil: () => {
+        queries.push(clock.now())
+        return queries.length === 1 ? secondReset : undefined
       },
     },
   )
 
-  expect(abfragen).toEqual([ersterReset + PUFFER, zweiterReset + PUFFER])
-  expect(startZweiterRun).toBe(zweiterReset + PUFFER)
+  expect(queries).toEqual([firstReset + BUFFER, secondReset + BUFFER])
+  expect(startSecondSession).toBe(secondReset + BUFFER)
   expect(
-    ereignisse.filter((e) => e.art === 'pause').map((e) => e.art === 'pause' && e.reset),
-  ).toEqual([ersterReset, zweiterReset])
+    events.filter((e) => e.type === 'pause').map((e) => e.type === 'pause' && e.reset),
+  ).toEqual([firstReset, secondReset])
 })
 
-test('verlangt ein Abbruch ohne Reset-Zeit Guthaben, hält die Engine den Lauf an, statt zu warten', async () => {
-  const uhr = steuerbareUhr()
+test('if an abort without a reset time requires credit, the engine halts the run instead of waiting', async () => {
+  const clock = manualClock()
 
-  const { ergebnis, ereignisse, tracker } = await lauf(
-    [() => ({ erfolg: false, usageLimit: 'guthaben' })],
-    { uhr },
+  const { result, events, tracker } = await run(
+    [() => ({ success: false, usageLimit: 'credit' })],
+    { clock },
   )
 
-  expect(ergebnis).toEqual({
+  expect(result).toEqual({
     tickets: [],
-    abschluss: { art: 'entfaellt', grund: 'Tickets offen' },
-    angehalten: 'guthaben',
+    finish: { type: 'skipped', reason: 'tickets open' },
+    halted: 'credit',
   })
-  expect(uhr.jetzt()).toBe(0)
-  expect(ereignisse.map((e) => e.art)).toEqual([
-    'lauf-begonnen',
+  expect(clock.now()).toBe(0)
+  expect(events.map((e) => e.type)).toEqual([
+    'run-started',
     'task-graph',
-    'ticket-genommen',
-    'versuch-begonnen',
-    'run-beendet',
-    'lauf-angehalten',
-    'lauf-beendet',
+    'ticket-taken',
+    'attempt-started',
+    'session-finished',
+    'run-halted',
+    'run-finished',
   ])
-  expect(tracker.ticket(2)).toMatchObject({ offen: true, labels: ['ready-for-agent'] })
+  expect(tracker.ticket(2)).toMatchObject({ open: true, labels: ['ready-for-agent'] })
 })
 
-test('ein Run endet nach 60 Minuten und ist ein roter Versuch', async () => {
-  const uhr = steuerbareUhr()
-  const abgebrochen: boolean[] = []
-  let rueckmeldung: string | undefined
+test('a session ends after 60 minutes and is a red attempt', async () => {
+  const clock = manualClock()
+  const aborted: boolean[] = []
+  let feedback: string | undefined
 
-  const { tracker } = await lauf(
+  const { tracker } = await run(
     [
-      (auftrag) => {
-        commitet(auftrag)
-        uhr.vorstellen(60 * MINUTE)
-        abgebrochen.push(auftrag.signal.aborted)
-        return { erfolg: true }
+      (request) => {
+        commits(request)
+        clock.advance(60 * MINUTE)
+        aborted.push(request.signal.aborted)
+        return { success: true }
       },
-      (auftrag) => {
-        rueckmeldung = auftrag.rueckmeldung
-        uhr.vorstellen(59 * MINUTE)
-        abgebrochen.push(auftrag.signal.aborted)
-        return { erfolg: true }
+      (request) => {
+        feedback = request.feedback
+        clock.advance(59 * MINUTE)
+        aborted.push(request.signal.aborted)
+        return { success: true }
       },
     ],
-    { uhr, versuche: 2 },
+    { clock, attempts: 2 },
   )
 
-  expect(abgebrochen).toEqual([true, false])
-  expect(rueckmeldung).toContain('nach 60 Minuten beendet')
-  expect(tracker.ticket(2).offen).toBe(false)
+  expect(aborted).toEqual([true, false])
+  expect(feedback).toContain('ended after 60 minutes')
+  expect(tracker.ticket(2).open).toBe(false)
 })
 
-test('ein Durchgang der Checks endet nach 15 Minuten und ist ein roter Versuch', async () => {
-  const uhr = steuerbareUhr()
-  // Jeder Check dauert 10 Minuten; der zweite reißt das Zeitlimit des Durchgangs.
+test('a pass of the checks ends after 15 minutes and is a red attempt', async () => {
+  const clock = manualClock()
+  // Each check takes 10 minutes; the second one breaks the time limit of the pass.
   const sandbox: Sandbox = {
-    fuehreAus: (befehl, optionen) => {
-      const ausfuehrung = durchreiche.fuehreAus(befehl, optionen)
-      uhr.vorstellen(10 * MINUTE)
-      return ausfuehrung
+    execute: (command, options) => {
+      const execution = passthrough.execute(command, options)
+      clock.advance(10 * MINUTE)
+      return execution
     },
   }
 
-  const { ereignisse } = await lauf([commitet], {
-    uhr,
+  const { events } = await run([commits], {
+    clock,
     sandbox,
-    checks: ['true', 'sleep 30; echo nie'],
+    checks: ['true', 'sleep 30; echo never'],
   })
 
   expect(
-    ereignisse.filter((e) => e.art === 'pruefung' && e.name.startsWith('Check')),
+    events.filter((e) => e.type === 'verification' && e.name.startsWith('Check')),
   ).toMatchObject([
     { name: 'Check: true', ok: true },
-    { name: 'Check: sleep 30; echo nie', ok: false },
+    { name: 'Check: sleep 30; echo never', ok: false },
   ])
-  expect(ereignisse.find((e) => e.art === 'ticket-gescheitert')).toMatchObject({
-    pruefung: 'Check: sleep 30; echo nie',
+  expect(events.find((e) => e.type === 'ticket-failed')).toMatchObject({
+    verification: 'Check: sleep 30; echo never',
   })
 })
 
-test('die Rückmeldung nach abgelaufenen Checks nennt das Zeitlimit', async () => {
-  const uhr = steuerbareUhr()
-  let rueckmeldung: string | undefined
+test('the feedback after timed-out checks names the time limit', async () => {
+  const clock = manualClock()
+  let feedback: string | undefined
   const sandbox: Sandbox = {
-    fuehreAus: async (_befehl, { signal }) => {
-      uhr.vorstellen(15 * MINUTE)
-      return { exitCode: signal.aborted ? 1 : 0, ausgabe: 'halb fertig' }
+    execute: async (_command, { signal }) => {
+      clock.advance(15 * MINUTE)
+      return { exitCode: signal.aborted ? 1 : 0, output: 'half done' }
     },
   }
 
-  await lauf(
+  await run(
     [
-      commitet,
-      (auftrag) => {
-        rueckmeldung = auftrag.rueckmeldung
-        return { erfolg: true }
+      commits,
+      (request) => {
+        feedback = request.feedback
+        return { success: true }
       },
     ],
-    { uhr, sandbox, versuche: 2 },
+    { clock, sandbox, attempts: 2 },
   )
 
-  expect(rueckmeldung).toContain('nach 15 Minuten beendet')
-  expect(rueckmeldung).toContain('halb fertig')
+  expect(feedback).toContain('ended after 15 minutes')
+  expect(feedback).toContain('half done')
 })

@@ -1,42 +1,42 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import type { Agent, RunErgebnis } from './agent.ts'
+import type { Agent, SessionResult } from './agent.ts'
 import type { SrtSandbox } from './sandbox.ts'
 
-export interface ClaudeOptionen {
-  /** `https://github.com/<owner>/<repo>`; die Ticket-URL ist `<repoUrl>/issues/<n>`. */
+export interface ClaudeOptions {
+  /** `https://github.com/<owner>/<repo>`; the ticket URL is `<repoUrl>/issues/<n>`. */
   repoUrl: string
-  /** Das `gh`-Token der Engine; der Run bekommt es als `GH_TOKEN`. */
+  /** The engine's `gh` token; the session gets it as `GH_TOKEN`. */
   token: string
   /**
-   * Die Sandbox um den ganzen `claude`-Prozess jedes Runs; `undefined` nur bei `sandbox.off`. Davon
-   * hängt der Permission-Modus ab: Bypass nur in der Sandbox, sonst Auto-Mode. Bypass ohne Sandbox
-   * gibt es nicht.
+   * The sandbox around the whole `claude` process of each session; `undefined` only with
+   * `sandbox.off`. The permission mode depends on it: bypass only in the sandbox, otherwise auto
+   * mode. There is no bypass without a sandbox.
    */
-  sandbox: Pick<SrtSandbox, 'umhuelle'> | undefined
+  sandbox: Pick<SrtSandbox, 'wrap'> | undefined
 }
 
-/** Der AFK-Hinweis, den jeder Run per `--append-system-prompt` bekommt. */
-export function afkHinweis(fixpunkt: string): string {
+/** The AFK note every session gets via `--append-system-prompt`. */
+export function afkNote(forkPoint: string): string {
   return [
     'You are running AFK: no human is available and nobody will answer a question.',
     'Never ask. Where a skill says to confirm something or ask the user, take the most obvious reading, decide yourself, note the decision and its reason, and continue.',
     'Choose the seams for mattpocock-skills:tdd yourself.',
     'Call the skills by their full names: mattpocock-skills:tdd and mattpocock-skills:code-review (not the built-in code-review).',
-    `The fixed point for the review is commit ${fixpunkt}.`,
-    `Work in this order: implement the ticket, commit, review with mattpocock-skills:code-review against ${fixpunkt}, fix the findings, then squash everything since ${fixpunkt} into one commit with a short message covering the whole work on the ticket.`,
+    `The fixed point for the review is commit ${forkPoint}.`,
+    `Work in this order: implement the ticket, commit, review with mattpocock-skills:code-review against ${forkPoint}, fix the findings, then squash everything since ${forkPoint} into one commit with a short message covering the whole work on the ticket.`,
   ].join('\n')
 }
 
-/** Der Agent hinter `claude -p`. */
-export function claudeAgent(optionen: ClaudeOptionen): Agent {
-  const env = umgebung(optionen.token)
+/** The agent behind `claude -p`. */
+export function claudeAgent(options: ClaudeOptions): Agent {
+  const env = environment(options.token)
   return {
-    async run(auftrag) {
-      let prompt = `/mattpocock-skills:implement ${optionen.repoUrl}/issues/${auftrag.ticket.nummer}`
-      if (auftrag.rueckmeldung) prompt += `\n\n${auftrag.rueckmeldung}`
-      const strom = auswertung()
-      const aufruf = [
+    async runSession(request) {
+      let prompt = `/mattpocock-skills:implement ${options.repoUrl}/issues/${request.ticket.number}`
+      if (request.feedback) prompt += `\n\n${request.feedback}`
+      const stream = evaluation()
+      const call = [
         'claude',
         '-p',
         prompt,
@@ -44,41 +44,41 @@ export function claudeAgent(optionen: ClaudeOptionen): Agent {
         'stream-json',
         '--verbose',
         '--permission-mode',
-        optionen.sandbox ? 'bypassPermissions' : 'auto',
+        options.sandbox ? 'bypassPermissions' : 'auto',
         '--append-system-prompt',
-        afkHinweis(auftrag.fixpunkt),
+        afkNote(request.forkPoint),
       ]
-      const exitCode = await starteProzess(
-        optionen.sandbox?.umhuelle(aufruf, auftrag.verzeichnis) ?? aufruf,
-        { verzeichnis: auftrag.verzeichnis, env, signal: auftrag.signal },
-        (zeile) => strom.lies(auftrag.ausgabe(zeile)),
+      const exitCode = await startProcess(
+        options.sandbox?.wrap(call, request.directory) ?? call,
+        { directory: request.directory, env, signal: request.signal },
+        (line) => stream.read(request.output(line)),
       )
-      return strom.ergebnis(exitCode)
+      return stream.result(exitCode)
     },
 
-    // `/usage` ruft kein Modell und kein Tool auf und kostet nichts; es läuft ohne Sandbox.
-    async erschoepftBis() {
-      let bis: number | undefined
-      await starteProzess(
+    // `/usage` calls no model and no tool and costs nothing; it runs without a sandbox.
+    async exhaustedUntil() {
+      let until: number | undefined
+      await startProcess(
         ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose'],
-        { verzeichnis: process.cwd(), env },
-        (zeile) => {
-          for (const fenster of leseStromZeile(zeile)?.usage_report?.rate_limits?.limits ?? []) {
-            if (fenster.percent < 100 || !fenster.resets_at) continue
-            bis = Math.max(bis ?? 0, Date.parse(fenster.resets_at))
+        { directory: process.cwd(), env },
+        (line) => {
+          for (const window of readStreamLine(line)?.usage_report?.rate_limits?.limits ?? []) {
+            if (window.percent < 100 || !window.resets_at) continue
+            until = Math.max(until ?? 0, Date.parse(window.resets_at))
           }
         },
       )
-      return bis
+      return until
     },
   }
 }
 
 /**
- * Umgebung eines Runs: ohne Retry-Watchdog (das Warten am Usage-Limit liegt in der Engine) und
- * ohne `ANTHROPIC_LOG` (zerstört das NDJSON), mit dem `gh`-Token der Engine.
+ * Environment of a session: without the retry watchdog (waiting at the usage limit lives in the
+ * engine) and without `ANTHROPIC_LOG` (breaks the NDJSON), with the engine's `gh` token.
  */
-function umgebung(token: string): NodeJS.ProcessEnv {
+function environment(token: string): NodeJS.ProcessEnv {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([k]) => !k.startsWith('CLAUDE_CODE_RETRY_WATCHDOG') && k !== 'ANTHROPIC_LOG',
@@ -88,49 +88,45 @@ function umgebung(token: string): NodeJS.ProcessEnv {
 }
 
 /**
- * Startet `argv` (`claude`, ggf. in der Sandbox) mit stdin auf `/dev/null` und reicht jede Zeile
- * von stdout und stderr weiter. Bricht `signal` ab, stirbt die ganze Prozessgruppe. Liefert den
- * Exit-Code (`null` nach Signal).
+ * Starts `argv` (`claude`, possibly in the sandbox) with stdin on `/dev/null` and passes on every
+ * line of stdout and stderr. If `signal` aborts, the whole process group dies. Returns the exit
+ * code (`null` after a signal).
  */
-function starteProzess(
-  [datei = '', ...args]: string[],
-  {
-    verzeichnis,
-    env,
-    signal,
-  }: { verzeichnis: string; env: NodeJS.ProcessEnv; signal?: AbortSignal },
-  aufZeile: (zeile: string) => void,
+function startProcess(
+  [file = '', ...args]: string[],
+  { directory, env, signal }: { directory: string; env: NodeJS.ProcessEnv; signal?: AbortSignal },
+  onLine: (line: string) => void,
 ): Promise<number | null> {
   return new Promise((resolve, reject) => {
-    const kind = spawn(datei, args, {
-      cwd: verzeichnis,
+    const child = spawn(file, args, {
+      cwd: directory,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Eigene Prozessgruppe, damit ein Abbruch auch die Kindprozesse des Runs trifft.
+      // Own process group, so that an abort also hits the session's child processes.
       detached: true,
     })
-    const beende = () => {
+    const kill = () => {
       try {
-        if (kind.pid !== undefined) process.kill(-kind.pid, 'SIGKILL')
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
       } catch {
-        // Die Gruppe ist schon weg.
+        // The group is already gone.
       }
     }
-    if (signal?.aborted) beende()
-    signal?.addEventListener('abort', beende, { once: true })
-    // stderr landet mit im Protokoll; die Auswertung überspringt Zeilen, die kein JSON sind.
-    createInterface({ input: kind.stdout }).on('line', aufZeile)
-    createInterface({ input: kind.stderr }).on('line', aufZeile)
-    kind.on('error', reject)
-    kind.on('close', (code) => {
-      signal?.removeEventListener('abort', beende)
+    if (signal?.aborted) kill()
+    signal?.addEventListener('abort', kill, { once: true })
+    // stderr ends up in the log too; the evaluation skips lines that aren't JSON.
+    createInterface({ input: child.stdout }).on('line', onLine)
+    createInterface({ input: child.stderr }).on('line', onLine)
+    child.on('error', reject)
+    child.on('close', (code) => {
+      signal?.removeEventListener('abort', kill)
       resolve(code)
     })
   })
 }
 
-/** Eine Zeile `stream-json` mit den Feldern, die groundhog liest; viele davon sind undokumentiert. */
-export interface StromZeile {
+/** A line of `stream-json` with the fields groundhog reads; many of them are undocumented. */
+export interface StreamLine {
   type?: string
   subtype?: string
   session_id?: string
@@ -141,30 +137,30 @@ export interface StromZeile {
   is_error?: boolean
   usage?: Record<string, unknown>
   total_cost_usd?: number
-  permission_denials?: { tool_name: string; tool_use_id: string; tool_input?: Eingabe }[]
-  /** `result` und `assistant` am Usage-Limit (undokumentiert). */
+  permission_denials?: { tool_name: string; tool_use_id: string; tool_input?: Input }[]
+  /** `result` and `assistant` at the usage limit (undocumented). */
   api_error?: string | null
-  /** `rate_limit_event`; `resetsAt` in Epoch-Sekunden. */
+  /** `rate_limit_event`; `resetsAt` in epoch seconds. */
   rate_limit_info?: { status?: string; resetsAt?: number; errorCode?: string }
-  /** `assistant` und `user`: der Inhalt; `system/permission_denied`: Text der Ablehnung. */
-  message?: string | { content?: Inhalt[] }
-  /** `user` nach Edit und Write: der Patch, bei neuen Dateien der Inhalt. */
+  /** `assistant` and `user`: the content; `system/permission_denied`: text of the refusal. */
+  message?: string | { content?: Content[] }
+  /** `user` after Edit and Write: the patch, for new files the content. */
   tool_use_result?: { type?: string; filePath?: string; content?: string; structuredPatch?: Hunk[] }
   /** `system/permission_denied` */
   tool_name?: string
   tool_use_id?: string
   decision_reason?: string
-  /** Antwort auf `/usage`; `resets_at` in ISO 8601. */
+  /** Answer to `/usage`; `resets_at` in ISO 8601. */
   usage_report?: { rate_limits?: { limits?: { percent: number; resets_at?: string }[] } | null }
 }
 
-/** Ein Teil des Inhalts: Text, `tool_use` oder `tool_result`. */
-export interface Inhalt {
+/** A part of the content: text, `tool_use` or `tool_result`. */
+export interface Content {
   type?: string
   id?: string
   text?: string
   name?: string
-  input?: Eingabe
+  input?: Input
   content?: string | { text?: string }[]
   is_error?: boolean
 }
@@ -175,96 +171,96 @@ export interface Hunk {
   lines: string[]
 }
 
-type Eingabe = Record<string, unknown>
+type Input = Record<string, unknown>
 
-/** Liest eine Zeile `stream-json`; keine JSON-Zeile ergibt `undefined`. */
-export function leseStromZeile(zeile: string): StromZeile | undefined {
+/** Reads a line of `stream-json`; a non-JSON line gives `undefined`. */
+export function readStreamLine(line: string): StreamLine | undefined {
   try {
-    return JSON.parse(zeile)
+    return JSON.parse(line)
   } catch {
     return undefined
   }
 }
 
-/** Liest den Strom eines Runs mit und bildet am Ende das Ergebnis. Den Fehlertext liest sie nie. */
-function auswertung() {
-  let init: StromZeile | undefined
-  let result: StromZeile | undefined
-  let limitErreicht = false
+/** Reads along a session's stream and builds the result at the end. It never reads the error text. */
+function evaluation() {
+  let init: StreamLine | undefined
+  let result: StreamLine | undefined
+  let limitReached = false
   let reset: number | undefined
-  let guthaben = false
-  const eingaben = new Map<string, Eingabe | undefined>()
-  const blocks = new Map<string, { tool: string; eingabe?: Eingabe; grund?: string }>()
+  let credit = false
+  const inputs = new Map<string, Input | undefined>()
+  const blocks = new Map<string, { tool: string; input?: Input; reason?: string }>()
 
   return {
-    lies(zeile: string) {
-      const z = leseStromZeile(zeile)
-      if (!z) return
-      if (z.api_error === 'usage_limit_reached') limitErreicht = true
-      if (z.type === 'system' && z.subtype === 'init') init = z
-      if (z.type === 'rate_limit_event' && z.rate_limit_info?.status === 'rejected') {
-        const { resetsAt, errorCode } = z.rate_limit_info
+    read(line: string) {
+      const l = readStreamLine(line)
+      if (!l) return
+      if (l.api_error === 'usage_limit_reached') limitReached = true
+      if (l.type === 'system' && l.subtype === 'init') init = l
+      if (l.type === 'rate_limit_event' && l.rate_limit_info?.status === 'rejected') {
+        const { resetsAt, errorCode } = l.rate_limit_info
         if (resetsAt !== undefined) reset = resetsAt * 1000
-        else if (errorCode === 'credits_required') guthaben = true
+        else if (errorCode === 'credits_required') credit = true
       }
-      if (z.type === 'assistant' && typeof z.message === 'object') {
-        for (const teil of z.message.content ?? []) {
-          if (teil.type === 'tool_use' && teil.id) eingaben.set(teil.id, teil.input)
+      if (l.type === 'assistant' && typeof l.message === 'object') {
+        for (const part of l.message.content ?? []) {
+          if (part.type === 'tool_use' && part.id) inputs.set(part.id, part.input)
         }
       }
-      if (z.type === 'system' && z.subtype === 'permission_denied' && z.tool_use_id) {
-        blocks.set(z.tool_use_id, {
-          tool: z.tool_name ?? '?',
-          eingabe: eingaben.get(z.tool_use_id),
-          grund: z.decision_reason ?? (typeof z.message === 'string' ? z.message : undefined),
+      if (l.type === 'system' && l.subtype === 'permission_denied' && l.tool_use_id) {
+        blocks.set(l.tool_use_id, {
+          tool: l.tool_name ?? '?',
+          input: inputs.get(l.tool_use_id),
+          reason: l.decision_reason ?? (typeof l.message === 'string' ? l.message : undefined),
         })
       }
-      if (z.type === 'result') {
-        result = z
-        // Dieselbe Ablehnung kann als Event und in `permission_denials` stehen.
-        for (const d of z.permission_denials ?? []) {
+      if (l.type === 'result') {
+        result = l
+        // The same refusal can appear as an event and in `permission_denials`.
+        for (const d of l.permission_denials ?? []) {
           const block = blocks.get(d.tool_use_id)
-          if (block) block.eingabe ??= d.tool_input
-          else blocks.set(d.tool_use_id, { tool: d.tool_name, eingabe: d.tool_input })
+          if (block) block.input ??= d.tool_input
+          else blocks.set(d.tool_use_id, { tool: d.tool_name, input: d.tool_input })
         }
       }
     },
 
-    ergebnis(exitCode: number | null): RunErgebnis {
-      const ergebnis: RunErgebnis = {
-        erfolg: exitCode === 0 && result?.is_error === false && result.subtype === 'success',
+    result(exitCode: number | null): SessionResult {
+      const session: SessionResult = {
+        success: exitCode === 0 && result?.is_error === false && result.subtype === 'success',
         sessionId: result?.session_id ?? init?.session_id,
         skills: init?.skills,
-        blocks: [...blocks.values()].map(({ tool, eingabe, grund }) => ({
+        blocks: [...blocks.values()].map(({ tool, input, reason }) => ({
           tool,
-          befehl: eingabe ? (wichtigstesArgument(eingabe) ?? JSON.stringify(eingabe)) : '',
-          ...(grund !== undefined && { grund }),
+          command: input ? (keyArgument(input) ?? JSON.stringify(input)) : '',
+          ...(reason !== undefined && { reason }),
         })),
       }
       if (result?.usage) {
-        ergebnis.tokens = Object.fromEntries(
+        session.tokens = Object.fromEntries(
           Object.entries(result.usage).filter(
             (e): e is [string, number] => typeof e[1] === 'number',
           ),
         )
       }
-      if (result?.total_cost_usd !== undefined) ergebnis.kostenUsd = result.total_cost_usd
+      if (result?.total_cost_usd !== undefined) session.costUsd = result.total_cost_usd
       if (exitCode !== 0) {
-        if (reset !== undefined) ergebnis.usageLimit = reset
-        else if (guthaben) ergebnis.usageLimit = 'guthaben'
-        // ponytail: Limit ohne Reset-Zeit → "jetzt"; die Engine wartet den Puffer und fragt `/usage`.
-        else if (limitErreicht) ergebnis.usageLimit = Date.now()
+        if (reset !== undefined) session.usageLimit = reset
+        else if (credit) session.usageLimit = 'credit'
+        // ponytail: limit without reset time → "now"; the engine waits its buffer and asks `/usage`.
+        else if (limitReached) session.usageLimit = Date.now()
       }
-      return ergebnis
+      return session
     },
   }
 }
 
-/** Das wichtigste Argument eines Tool-Aufrufs, für Mitschrift und Blocks. */
-export function wichtigstesArgument(eingabe: Eingabe | undefined): string | undefined {
-  for (const feld of ['command', 'file_path', 'pattern', 'url', 'description']) {
-    const wert = eingabe?.[feld]
-    if (typeof wert === 'string') return wert
+/** The most important argument of a tool call, for transcript and blocks. */
+export function keyArgument(input: Input | undefined): string | undefined {
+  for (const field of ['command', 'file_path', 'pattern', 'url', 'description']) {
+    const value = input?.[field]
+    if (typeof value === 'string') return value
   }
   return undefined
 }

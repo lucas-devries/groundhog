@@ -1,131 +1,131 @@
 #!/usr/bin/env node
 import * as p from '@clack/prompts'
-import { abbruchWaechter } from './abort.ts'
-import { zeigeTafel } from './board.ts'
+import { abortGuard } from './abort.ts'
+import { showBoard } from './board.ts'
 import { claudeAgent } from './claude.ts'
-import { systemUhr } from './clock.ts'
-import { anzeige } from './display.ts'
-import { type Ereignis, fahreLauf } from './engine.ts'
+import { systemClock } from './clock.ts'
+import { display } from './display.ts'
+import { driveRun, type Event } from './engine.ts'
 import { herdr } from './herdr.ts'
 import { init } from './init.ts'
-import { durchreiche } from './sandbox.ts'
-import { starte } from './start.ts'
-import { aktualisiere, installiere, neuereVersion, VERSION } from './update.ts'
+import { passthrough } from './sandbox.ts'
+import { start } from './start.ts'
+import { install, newerVersion, update, VERSION } from './update.ts'
 
-const HILFE = `groundhog ${VERSION}: arbeitet die Tickets einer Spec ab, ohne Menschen.
+const HELP = `groundhog ${VERSION}: works through the tickets of a spec, without humans.
 
-Befehle:
-  groundhog <spec>     Lauf über die Tickets der Spec mit dieser Issue-Nummer
-  groundhog init       Projekt-Konfiguration groundhog.json anlegen oder ändern
-  groundhog update     neueste Version installieren
-  groundhog --version  Version zeigen
-  groundhog --help     diese Hilfe
+Commands:
+  groundhog <spec>     run over the tickets of the spec with this issue number
+  groundhog init       create or change the project config groundhog.json
+  groundhog update     install the newest version
+  groundhog --version  show the version
+  groundhog --help     this help
 
-Exit-Codes eines Laufs:
-  0    regulär beendet, kein Ticket gescheitert
-  1    Start abgebrochen, Lauf mit Fehler abgebrochen oder ohne Guthaben angehalten
-  2    regulär beendet, mindestens ein Ticket endgültig gescheitert (ready-for-human)
-  130  mit Strg+C abgebrochen`
+Exit codes of a run:
+  0    finished regularly, no ticket failed
+  1    start aborted, run aborted with an error or halted without credit
+  2    finished regularly, at least one ticket failed for good (ready-for-human)
+  130  aborted with Ctrl+C`
 
 const args = process.argv.slice(2)
-const [befehl] = args
-if (args.length === 1 && befehl === 'init') {
+const [command] = args
+if (args.length === 1 && command === 'init') {
   p.intro('groundhog init')
-  const { exitCode, meldung } = await init({
-    verzeichnis: process.cwd(),
+  const { exitCode, message } = await init({
+    directory: process.cwd(),
     dialog: { ...p, info: p.log.info },
-    istTerminal: process.stdin.isTTY === true,
+    isTerminal: process.stdin.isTTY === true,
   })
-  if (exitCode === 0) p.outro(meldung)
-  else p.cancel(meldung)
+  if (exitCode === 0) p.outro(message)
+  else p.cancel(message)
   process.exitCode = exitCode
-} else if (args.length === 1 && befehl === 'update') {
-  const { exitCode, meldung } = aktualisiere()
-  if (exitCode === 0) console.log(meldung)
-  else console.error(`groundhog: ${meldung}`)
+} else if (args.length === 1 && command === 'update') {
+  const { exitCode, message } = update()
+  if (exitCode === 0) console.log(message)
+  else console.error(`groundhog: ${message}`)
   process.exitCode = exitCode
-} else if (args.length === 1 && befehl === '--version') {
+} else if (args.length === 1 && command === '--version') {
   console.log(VERSION)
-} else if (args.length === 1 && befehl === '--help') {
-  console.log(HILFE)
-} else if (args.length === 1 && befehl && /^[1-9]\d*$/.test(befehl)) {
-  process.exitCode = await lauf(Number(befehl))
+} else if (args.length === 1 && command === '--help') {
+  console.log(HELP)
+} else if (args.length === 1 && command && /^[1-9]\d*$/.test(command)) {
+  process.exitCode = await run(Number(command))
 } else {
-  console.error(`groundhog: unbekannter Aufruf. Siehe groundhog --help.`)
+  console.error(`groundhog: unknown call. See groundhog --help.`)
   process.exitCode = 1
 }
 
-async function lauf(spec: number): Promise<number> {
+async function run(spec: number): Promise<number> {
   p.intro(`groundhog ${VERSION}`)
-  let zeige: (e: Ereignis) => void = () => {}
-  const herdrMeldung = herdr(process.env, process.stdout.isTTY === true)
-  const start = await starte({
-    verzeichnis: process.cwd(),
+  let show: (e: Event) => void = () => {}
+  const herdrReport = herdr(process.env, process.stdout.isTTY === true)
+  const ready = await start({
+    directory: process.cwd(),
     spec,
     dialog: { ...p, warn: p.log.warn },
-    istTerminal: process.stdin.isTTY === true,
-    update: { neuereVersion, installiere },
-    weiter: (e) => {
-      zeige(e)
-      process.stdout.write(herdrMeldung(e) ?? '')
+    isTerminal: process.stdin.isTTY === true,
+    update: { newerVersion, install },
+    next: (e) => {
+      show(e)
+      process.stdout.write(herdrReport(e) ?? '')
     },
   })
-  if (!start.ok) {
-    if (start.exitCode === 0) p.outro(start.meldung)
-    else p.cancel(start.meldung)
-    return start.exitCode
+  if (!ready.ok) {
+    if (ready.exitCode === 0) p.outro(ready.message)
+    else p.cancel(ready.message)
+    return ready.exitCode
   }
-  /** Verlässt die Tafel, damit eine Fehlermeldung im normalen Bildschirm stehen bleibt. */
-  let schliesse = () => {}
-  const signale = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
-  let empfange = (_: NodeJS.Signals) => {}
+  /** Leaves the board, so that an error message stays on the normal screen. */
+  let close = () => {}
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
+  let receive = (_: NodeJS.Signals) => {}
   try {
-    const { verzeichnis, konfiguration, token, protokoll } = start
+    const { directory, config, token, log } = ready
     if (process.stdout.isTTY) {
-      ;({ melde: zeige, schliesse } = zeigeTafel(process.stdout, protokoll.pfad))
+      ;({ report: show, close } = showBoard(process.stdout, log.path))
     } else {
-      const zeilen = anzeige({ protokoll: protokoll.pfad })
-      zeige = (e) => {
-        for (const zeile of zeilen(e)) process.stdout.write(`${zeile}\n`)
+      const lines = display({ logDir: log.path })
+      show = (e) => {
+        for (const line of lines(e)) process.stdout.write(`${line}\n`)
       }
     }
-    const waechter = abbruchWaechter({
-      uhr: systemUhr,
-      hinweis: (text) => protokoll.melde({ art: 'warnung', text, zeit: systemUhr.jetzt() }),
-      // Signal während des Aufräumens: sofort raus; die Tafel räumt im 'exit'-Handler auf.
-      hart: () => {
-        start.freigeben()
+    const guard = abortGuard({
+      clock: systemClock,
+      note: (text) => log.report({ type: 'warning', text, time: systemClock.now() }),
+      // Signal during cleanup: out at once; the board cleans up in the 'exit' handler.
+      hard: () => {
+        ready.release()
         process.exit(130)
       },
     })
-    empfange = waechter.empfange
-    for (const s of signale) process.on(s, empfange)
-    const ergebnis = await fahreLauf({
+    receive = guard.receive
+    for (const s of signals) process.on(s, receive)
+    const result = await driveRun({
       spec,
-      auswahl: start.auswahl,
-      verzeichnis,
-      checks: konfiguration.checks,
-      maxVersuche: konfiguration.attempts,
+      choice: ready.choice,
+      directory,
+      checks: config.checks,
+      maxAttempts: config.attempts,
       token,
-      versionen: { groundhog: VERSION, ...start.versionen },
-      protokoll: protokoll.pfad,
-      tracker: start.tracker,
-      // Dieselbe Sandbox um Runs und Checks; ohne sie kein Bypass (sandbox.off).
-      agent: claudeAgent({ repoUrl: start.repoUrl, token, sandbox: start.sandbox }),
-      sandbox: start.sandbox ?? durchreiche,
-      uhr: systemUhr,
-      melde: protokoll.melde,
-      abbruch: waechter.signal,
+      versions: { groundhog: VERSION, ...ready.versions },
+      logDir: log.path,
+      tracker: ready.tracker,
+      // The same sandbox around sessions and checks; without it no bypass (sandbox.off).
+      agent: claudeAgent({ repoUrl: ready.repoUrl, token, sandbox: ready.sandbox }),
+      sandbox: ready.sandbox ?? passthrough,
+      clock: systemClock,
+      report: log.report,
+      abort: guard.signal,
     })
-    if (ergebnis.angehalten === 'abgebrochen') return 130
-    if (ergebnis.angehalten) return 1
-    return ergebnis.tickets.some((t) => t.ergebnis === 'gescheitert') ? 2 : 0
-  } catch (fehler) {
-    schliesse()
-    console.error(`groundhog: Lauf abgebrochen: ${(fehler as Error).message}`)
+    if (result.halted === 'aborted') return 130
+    if (result.halted) return 1
+    return result.tickets.some((t) => t.result === 'failed') ? 2 : 0
+  } catch (error) {
+    close()
+    console.error(`groundhog: run aborted: ${(error as Error).message}`)
     return 1
   } finally {
-    for (const s of signale) process.off(s, empfange)
-    start.freigeben()
+    for (const s of signals) process.off(s, receive)
+    ready.release()
   }
 }

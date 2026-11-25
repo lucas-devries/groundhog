@@ -3,19 +3,19 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname } from 'node:path'
 import { SandboxRuntimeConfigSchema } from '@anthropic-ai/sandbox-runtime'
 import { expect, test } from 'vitest'
-import { sandboxFehlt, srtKonfiguration, srtSandbox } from './sandbox.ts'
+import { sandboxMissing, srtConfig, srtSandbox } from './sandbox.ts'
 
-const ORTE = {
-  verzeichnis: '/arbeit/klon',
+const PATHS = {
+  directory: '/work/clone',
   home: '/home/ada',
   temp: '/tmp',
-  geschuetzt: '/tmp/srt-x',
+  settingsDir: '/tmp/srt-x',
 }
 
-test('srt-Config ohne zusätzliche Hosts: feste Host-Liste, Schreiben nur in Arbeitsverzeichnis, Claude, npm-Cache und Temp', () => {
-  const konfiguration = srtKonfiguration({ ...ORTE, hosts: [] })
+test('srt config without extra hosts: fixed host list, writing only to the working tree, Claude, npm cache and temp', () => {
+  const config = srtConfig({ ...PATHS, hosts: [] })
 
-  expect(konfiguration).toEqual({
+  expect(config).toEqual({
     network: {
       allowedDomains: [
         'api.anthropic.com',
@@ -30,7 +30,7 @@ test('srt-Config ohne zusätzliche Hosts: feste Host-Liste, Schreiben nur in Arb
     filesystem: {
       denyRead: ['/home/ada/.ssh', '/home/ada/.config/gh', '/home/ada/.npmrc'],
       allowWrite: [
-        '/arbeit/klon',
+        '/work/clone',
         '/home/ada/.claude',
         '/home/ada/.claude.json',
         '/home/ada/.npm',
@@ -38,22 +38,22 @@ test('srt-Config ohne zusätzliche Hosts: feste Host-Liste, Schreiben nur in Arb
       ],
       denyWrite: [
         '/home/ada/.claude/settings.json',
-        '/arbeit/klon/.git/hooks',
-        '/arbeit/klon/.git/config',
+        '/work/clone/.git/hooks',
+        '/work/clone/.git/config',
         '/tmp/srt-x',
       ],
     },
   })
-  expect(SandboxRuntimeConfigSchema.safeParse(konfiguration).success).toBe(true)
+  expect(SandboxRuntimeConfigSchema.safeParse(config).success).toBe(true)
 })
 
-test('srt-Config mit zusätzlichen Hosts: sie kommen nach der festen Liste dazu', () => {
-  const konfiguration = srtKonfiguration({
-    ...ORTE,
-    hosts: ['npm.example.com', '*.intern.example'],
+test('srt config with extra hosts: they come after the fixed list', () => {
+  const config = srtConfig({
+    ...PATHS,
+    hosts: ['npm.example.com', '*.internal.example'],
   })
 
-  expect(konfiguration.network.allowedDomains).toEqual([
+  expect(config.network.allowedDomains).toEqual([
     'api.anthropic.com',
     'claude.ai',
     'platform.claude.com',
@@ -61,18 +61,18 @@ test('srt-Config mit zusätzlichen Hosts: sie kommen nach der festen Liste dazu'
     'api.github.com',
     'github.com',
     'npm.example.com',
-    '*.intern.example',
+    '*.internal.example',
   ])
-  expect(SandboxRuntimeConfigSchema.safeParse(konfiguration).success).toBe(true)
+  expect(SandboxRuntimeConfigSchema.safeParse(config).success).toBe(true)
 })
 
-test('startbare Sandbox: nichts fehlt', () => {
-  expect(sandboxFehlt({ abhaengigkeiten: () => [], uid: 1000 })).toEqual([])
+test('sandbox that can start: nothing missing', () => {
+  expect(sandboxMissing({ dependencies: () => [], uid: 1000 })).toEqual([])
 })
 
-test('nicht startbare Sandbox: nennt fehlende Werkzeuge und den Start als root', () => {
-  const fehlt = sandboxFehlt({
-    abhaengigkeiten: () => [
+test('sandbox that cannot start: names missing tools and starting as root', () => {
+  const missing = sandboxMissing({
+    dependencies: () => [
       'bubblewrap (bwrap) not installed',
       'socat not installed',
       'ripgrep (rg) not found',
@@ -80,29 +80,29 @@ test('nicht startbare Sandbox: nennt fehlende Werkzeuge und den Start als root',
     uid: 0,
   })
 
-  expect(fehlt).toEqual([
+  expect(missing).toEqual([
     'bubblewrap (bwrap) not installed',
     'socat not installed',
     'ripgrep (rg) not found',
-    'Start als root: claude startet als root nicht mit Bypass',
+    'Started as root: claude does not start with bypass as root',
   ])
 })
 
-test('srtSandbox startet einen Befehl über die srt-CLI mit einer geschützten Config für das Arbeitsverzeichnis', () => {
-  const argv = srtSandbox(['npm.example.com']).umhuelle(['claude', '-p', 'a b'], '/arbeit/klon')
+test('srtSandbox starts a command via the srt CLI with a protected config for the working tree', () => {
+  const argv = srtSandbox(['npm.example.com']).wrap(['claude', '-p', 'a b'], '/work/clone')
 
-  const [node, cli, schalter, datei, trenner, ...befehl] = argv
+  const [node, cli, flag, file, separator, ...command] = argv
   expect(node).toBe(process.execPath)
   expect(cli).toMatch(/@anthropic-ai\/sandbox-runtime\/dist\/cli\.js$/)
   expect(existsSync(cli ?? '')).toBe(true)
-  expect([schalter, trenner, befehl]).toEqual(['--settings', '--', ['claude', '-p', 'a b']])
-  expect(JSON.parse(readFileSync(datei ?? '', 'utf8'))).toEqual(
-    srtKonfiguration({
-      verzeichnis: '/arbeit/klon',
+  expect([flag, separator, command]).toEqual(['--settings', '--', ['claude', '-p', 'a b']])
+  expect(JSON.parse(readFileSync(file ?? '', 'utf8'))).toEqual(
+    srtConfig({
+      directory: '/work/clone',
       hosts: ['npm.example.com'],
       home: homedir(),
       temp: tmpdir(),
-      geschuetzt: dirname(datei ?? ''),
+      settingsDir: dirname(file ?? ''),
     }),
   )
 })

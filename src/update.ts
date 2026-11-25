@@ -1,73 +1,73 @@
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 
-/** Die installierte Version. Ein Release entsteht mit `npm version <x>`, das den Tag mit anlegt. */
+/** The installed version. A release is made with `npm version <x>`, which also creates the tag. */
 export const VERSION: string = createRequire(import.meta.url)('../package.json').version
 
 const REPO = 'lucas-devries/groundhog'
-/** Die Erstinstallation ist `npm install -g github:lucas-devries/groundhog`; `prepare` baut mit `tsc`. */
-const paket = (tag: string) => `github:${REPO}#${tag}`
+/** The first install is `npm install -g github:lucas-devries/groundhog`; `prepare` builds with `tsc`. */
+const pkg = (tag: string) => `github:${REPO}#${tag}`
 
-// ponytail: nur X.Y.Z, Pre-Release-Tags zählen nicht.
+// ponytail: only X.Y.Z, pre-release tags don't count.
 const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)$/
 
-function vergleiche(a: string, b: string): number {
+function compare(a: string, b: string): number {
   const x = (a.match(SEMVER) ?? []).slice(1).map(Number)
   const y = (b.match(SEMVER) ?? []).slice(1).map(Number)
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return (x[i] ?? 0) - (y[i] ?? 0)
   return 0
 }
 
-/** Der neueste SemVer-Tag des groundhog-Repos, ohne GitHub Release; wirft, wenn GitHub nicht antwortet. */
-function neuesterTag(): string | undefined {
-  const lauf = spawnSync('gh', ['api', '--paginate', `repos/${REPO}/tags`, '--jq', '.[].name'], {
+/** The newest SemVer tag of the groundhog repo, without a GitHub release; throws if GitHub doesn't answer. */
+function newestTag(): string | undefined {
+  const result = spawnSync('gh', ['api', '--paginate', `repos/${REPO}/tags`, '--jq', '.[].name'], {
     encoding: 'utf8',
     timeout: 15_000,
   })
-  if (lauf.status !== 0) throw new Error(lauf.stderr?.trim() || String(lauf.error))
-  return lauf.stdout
+  if (result.status !== 0) throw new Error(result.stderr?.trim() || String(result.error))
+  return result.stdout
     .split('\n')
     .filter((t) => SEMVER.test(t))
-    .sort(vergleiche)
+    .sort(compare)
     .at(-1)
 }
 
-/** Der neueste Tag, falls er neuer ist als `version`. Ein gescheiterter Vergleich bleibt stumm. */
-export function neuereVersion(version = VERSION): string | undefined {
+/** The newest tag, if it is newer than `version`. A failed comparison stays silent. */
+export function newerVersion(version = VERSION): string | undefined {
   try {
-    const tag = neuesterTag()
-    return tag && vergleiche(tag, version) > 0 ? tag : undefined
+    const tag = newestTag()
+    return tag && compare(tag, version) > 0 ? tag : undefined
   } catch {
     return undefined
   }
 }
 
-/** Installiert `tag` global auf demselben Weg wie die Erstinstallation; wirft, wenn npm scheitert. */
-export function installiere(tag: string): void {
-  const lauf = spawnSync('npm', ['install', '-g', paket(tag)], { stdio: 'inherit' })
-  if (lauf.status !== 0) {
-    throw new Error(`Das Update auf ${tag} ist gescheitert (npm install -g ${paket(tag)}).`)
+/** Installs `tag` globally the same way as the first install; throws if npm fails. */
+export function install(tag: string): void {
+  const result = spawnSync('npm', ['install', '-g', pkg(tag)], { stdio: 'inherit' })
+  if (result.status !== 0) {
+    throw new Error(`The update to ${tag} failed (npm install -g ${pkg(tag)}).`)
   }
 }
 
-/** `groundhog update`: installiert den neuesten Tag oder meldet, dass die Version aktuell ist. */
-export function aktualisiere(version = VERSION): { exitCode: number; meldung: string } {
+/** `groundhog update`: installs the newest tag or reports that the version is up to date. */
+export function update(version = VERSION): { exitCode: number; message: string } {
   let tag: string | undefined
   try {
-    tag = neuesterTag()
-  } catch (fehler) {
+    tag = newestTag()
+  } catch (error) {
     return {
       exitCode: 1,
-      meldung: `Die neueste Version ließ sich nicht ermitteln: ${(fehler as Error).message}`,
+      message: `Could not determine the newest version: ${(error as Error).message}`,
     }
   }
-  if (!tag || vergleiche(tag, version) <= 0) {
-    return { exitCode: 0, meldung: `groundhog ${version} ist aktuell.` }
+  if (!tag || compare(tag, version) <= 0) {
+    return { exitCode: 0, message: `groundhog ${version} is up to date.` }
   }
   try {
-    installiere(tag)
-  } catch (fehler) {
-    return { exitCode: 1, meldung: (fehler as Error).message }
+    install(tag)
+  } catch (error) {
+    return { exitCode: 1, message: (error as Error).message }
   }
-  return { exitCode: 0, meldung: `groundhog ${tag} ist installiert.` }
+  return { exitCode: 0, message: `groundhog ${tag} is installed.` }
 }

@@ -1,51 +1,51 @@
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { fahreLauf } from './engine.ts'
-import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { type AgentScript, fakeAgent } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { driveRun } from './engine.ts'
+import { passthrough } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
-/** Ein bearbeitbares Ticket, wenn `teil` nichts anderes sagt. */
-const ticket = (nummer: number, teil: Partial<Ticket> = {}): Ticket => ({
-  nummer,
-  offen: true,
+/** A workable ticket, unless `part` says otherwise. */
+const ticket = (number: number, part: Partial<Ticket> = {}): Ticket => ({
+  number,
+  open: true,
   labels: ['ready-for-agent'],
   assignees: [],
-  blocker: [],
-  ...teil,
+  blockers: [],
+  ...part,
 })
 
-/** Ein Run, der das Ticket grün umsetzt. */
-const setztUm: AgentSkript = ({ verzeichnis, ticket }) => {
-  commitDatei(verzeichnis, `${ticket.nummer}.txt`, 'x', `Ticket ${ticket.nummer} umsetzen`)
-  return { erfolg: true }
+/** A session that implements the ticket green. */
+const implementsTicket: AgentScript = ({ directory, ticket }) => {
+  commitFile(directory, `${ticket.number}.txt`, 'x', `Implement ticket ${ticket.number}`)
+  return { success: true }
 }
 
-/** Fährt einen ganzen Lauf über Spec 1; liefert die Nummern der genommenen Tickets in Reihenfolge. */
-async function genommen(
+/** Drives a whole run over spec 1; returns the numbers of the taken tickets in order. */
+async function taken(
   tracker: InMemoryTracker,
-  skript: AgentSkript[] = Array(10).fill(setztUm),
+  script: AgentScript[] = Array(10).fill(implementsTicket),
 ): Promise<number[]> {
-  const nummern: number[] = []
-  await fahreLauf({
+  const numbers: number[] = []
+  await driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis: wegwerfRepo().klon,
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory: throwawayRepo().clone,
     checks: [],
     tracker,
-    agent: fakeAgent(skript),
-    sandbox: durchreiche,
-    uhr: steuerbareUhr(),
-    melde: (e) => {
-      if (e.art === 'ticket-genommen') nummern.push(e.ticket)
+    agent: fakeAgent(script),
+    sandbox: passthrough,
+    clock: manualClock(),
+    report: (e) => {
+      if (e.type === 'ticket-taken') numbers.push(e.ticket)
     },
   })
-  return nummern
+  return numbers
 }
 
-test('ohne ready-for-agent oder mit ready-for-human wird ein Ticket übersprungen', async () => {
-  const tracker = new InMemoryTracker('ich', [
+test('without ready-for-agent or with ready-for-human a ticket is skipped', async () => {
+  const tracker = new InMemoryTracker('me', [
     ticket(2, { labels: [] }),
     ticket(3, { labels: ['ready-for-human'] }),
     ticket(4, { labels: ['ready-for-agent', 'ready-for-human'] }),
@@ -53,104 +53,101 @@ test('ohne ready-for-agent oder mit ready-for-human wird ein Ticket übersprunge
     ticket(6),
   ])
 
-  expect(await genommen(tracker)).toEqual([6])
+  expect(await taken(tracker)).toEqual([6])
 })
 
-test('ein offener Blocker sperrt, auch außerhalb der Spec; ein geschlossener gibt frei', async () => {
-  const tracker = new InMemoryTracker('ich', [
-    ticket(2, { blocker: [{ nummer: 99, offen: true }] }),
-    ticket(3, { blocker: [{ nummer: 98, offen: false }] }),
+test('an open blocker blocks, even outside the spec; a closed one releases', async () => {
+  const tracker = new InMemoryTracker('me', [
+    ticket(2, { blockers: [{ number: 99, open: true }] }),
+    ticket(3, { blockers: [{ number: 98, open: false }] }),
   ])
 
-  expect(await genommen(tracker)).toEqual([3])
+  expect(await taken(tracker)).toEqual([3])
 })
 
-test('ein Ticket wird frei, sobald die Engine seinen Blocker geschlossen hat', async () => {
-  const tracker = new InMemoryTracker('ich', [
-    ticket(2, { blocker: [{ nummer: 4, offen: true }] }),
-    ticket(3, { blocker: [{ nummer: 2, offen: true }] }),
+test('a ticket becomes free as soon as the engine has closed its blocker', async () => {
+  const tracker = new InMemoryTracker('me', [
+    ticket(2, { blockers: [{ number: 4, open: true }] }),
+    ticket(3, { blockers: [{ number: 2, open: true }] }),
     ticket(4),
   ])
 
-  expect(await genommen(tracker)).toEqual([4, 2, 3])
+  expect(await taken(tracker)).toEqual([4, 2, 3])
 })
 
-test('ein anderem zugewiesenes Ticket wird übersprungen, ein mir zugewiesenes genommen', async () => {
-  const tracker = new InMemoryTracker('ich', [
-    ticket(2, { assignees: ['du'] }),
-    ticket(3, { assignees: ['ich', 'du'] }),
-    ticket(4, { assignees: ['ich'] }),
+test('a ticket assigned to someone else is skipped, one assigned to me is taken', async () => {
+  const tracker = new InMemoryTracker('me', [
+    ticket(2, { assignees: ['you'] }),
+    ticket(3, { assignees: ['me', 'you'] }),
+    ticket(4, { assignees: ['me'] }),
   ])
 
-  expect(await genommen(tracker)).toEqual([4])
+  expect(await taken(tracker)).toEqual([4])
 })
 
-test('die Engine nimmt die niedrigste Nummer aus der Frontier', async () => {
-  const tracker = new InMemoryTracker('ich', [ticket(5), ticket(3), ticket(4)])
+test('the engine takes the lowest number from the frontier', async () => {
+  const tracker = new InMemoryTracker('me', [ticket(5), ticket(3), ticket(4)])
 
-  expect(await genommen(tracker)).toEqual([3, 4, 5])
+  expect(await taken(tracker)).toEqual([3, 4, 5])
 })
 
-test('eine Änderung im Tracker während des Laufs gilt ab dem nächsten Ticket', async () => {
-  const tracker = new InMemoryTracker('ich', [
+test('a change in the tracker during the run applies from the next ticket on', async () => {
+  const tracker = new InMemoryTracker('me', [
     ticket(2),
     ticket(3, { labels: [] }),
     ticket(4),
-    ticket(5, { blocker: [{ nummer: 99, offen: true }] }),
+    ticket(5, { blockers: [{ number: 99, open: true }] }),
   ])
 
-  const reihenfolge = await genommen(tracker, [
-    (auftrag) => {
-      tracker.aendere(3, (t) => t.labels.push('ready-for-agent'))
-      tracker.aendere(4, (t) => t.assignees.push('du'))
-      tracker.aendere(5, (t) => {
-        t.blocker = [{ nummer: 99, offen: false }]
+  const order = await taken(tracker, [
+    (request) => {
+      tracker.change(3, (t) => t.labels.push('ready-for-agent'))
+      tracker.change(4, (t) => t.assignees.push('you'))
+      tracker.change(5, (t) => {
+        t.blockers = [{ number: 99, open: false }]
       })
-      return setztUm(auftrag)
+      return implementsTicket(request)
     },
-    setztUm,
-    setztUm,
+    implementsTicket,
+    implementsTicket,
   ])
 
-  expect(reihenfolge).toEqual([2, 3, 5])
+  expect(order).toEqual([2, 3, 5])
 })
 
-test('ein Tracker-Fehler bricht den Lauf ab, ohne ein Ticket rot zu machen', async () => {
-  const tracker = new InMemoryTracker('ich', [ticket(2), ticket(3)])
+test('a tracker error aborts the run without making a ticket red', async () => {
+  const tracker = new InMemoryTracker('me', [ticket(2), ticket(3)])
   const taskGraph = tracker.taskGraph.bind(tracker)
-  let abfragen = 0
+  let queries = 0
   tracker.taskGraph = async () => {
-    if (++abfragen > 1) throw new Error('gh: nicht erreichbar')
+    if (++queries > 1) throw new Error('gh: unreachable')
     return taskGraph()
   }
-  const arten: string[] = []
+  const types: string[] = []
 
-  const lauf = fahreLauf({
+  const run = driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis: wegwerfRepo().klon,
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory: throwawayRepo().clone,
     checks: [],
     tracker,
-    agent: fakeAgent([setztUm, setztUm]),
-    sandbox: durchreiche,
-    uhr: steuerbareUhr(),
-    melde: (e) => arten.push(`${e.art} ${'ticket' in e ? e.ticket : ''}`),
+    agent: fakeAgent([implementsTicket, implementsTicket]),
+    sandbox: passthrough,
+    clock: manualClock(),
+    report: (e) => types.push(`${e.type} ${'ticket' in e ? e.ticket : ''}`),
   })
 
-  await expect(lauf).rejects.toThrow('gh: nicht erreichbar')
-  expect(arten.filter((a) => a.startsWith('ticket'))).toEqual([
-    'ticket-genommen 2',
-    'ticket-erledigt 2',
-  ])
-  expect(tracker.ticket(3)).toMatchObject({ offen: true, assignees: [] })
+  await expect(run).rejects.toThrow('gh: unreachable')
+  expect(types.filter((a) => a.startsWith('ticket'))).toEqual(['ticket-taken 2', 'ticket-done 2'])
+  expect(tracker.ticket(3)).toMatchObject({ open: true, assignees: [] })
 })
 
-test('die Abhängigen eines übersprungenen Tickets bleiben blockiert', async () => {
-  const tracker = new InMemoryTracker('ich', [
+test('the dependents of a skipped ticket stay blocked', async () => {
+  const tracker = new InMemoryTracker('me', [
     ticket(2, { labels: ['ready-for-human'] }),
-    ticket(3, { blocker: [{ nummer: 2, offen: true }] }),
-    ticket(4, { blocker: [{ nummer: 3, offen: true }] }),
+    ticket(3, { blockers: [{ number: 2, open: true }] }),
+    ticket(4, { blockers: [{ number: 3, open: true }] }),
   ])
 
-  expect(await genommen(tracker)).toEqual([])
+  expect(await taken(tracker)).toEqual([])
 })

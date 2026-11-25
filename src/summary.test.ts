@@ -1,211 +1,211 @@
 import { hostname } from 'node:os'
 import { expect, test } from 'vitest'
-import { type AgentSkript, fakeAgent } from './agent.ts'
-import { steuerbareUhr } from './clock.ts'
-import { type Ereignis, fahreLauf, type LaufEingabe } from './engine.ts'
+import { type AgentScript, fakeAgent } from './agent.ts'
+import { manualClock } from './clock.ts'
+import { driveRun, type Event, type RunInput } from './engine.ts'
 import { git } from './git.ts'
-import { durchreiche } from './sandbox.ts'
-import { commitDatei, wegwerfRepo } from './testing/throwaway-repo.ts'
+import { passthrough } from './sandbox.ts'
+import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
 const START = new Date(2026, 10, 25, 22, 0, 0).getTime()
 const MINUTE = 60_000
 
-const ticket = (nummer: number, teil: Partial<Ticket> = {}): Ticket => ({
-  nummer,
-  offen: true,
+const ticket = (number: number, part: Partial<Ticket> = {}): Ticket => ({
+  number,
+  open: true,
   labels: ['ready-for-agent'],
   assignees: [],
-  blocker: [],
-  ...teil,
+  blockers: [],
+  ...part,
 })
 
-/** Fährt einen ganzen Lauf über Spec 1 mit Ziel-Branch main; jeder Run dauert 10 Minuten. */
-async function lauf(
-  klon: string,
+/** Drives a whole run over spec 1 with target branch main; each session takes 10 minutes. */
+async function run(
+  clone: string,
   tracker: InMemoryTracker,
-  skript: AgentSkript[],
-  eingabe: Partial<LaufEingabe> = {},
+  script: AgentScript[],
+  input: Partial<RunInput> = {},
 ) {
-  const uhr = steuerbareUhr(START)
-  const ereignisse: Ereignis[] = []
-  const ergebnis = await fahreLauf({
+  const clock = manualClock(START)
+  const events: Event[] = []
+  const result = await driveRun({
     spec: 1,
-    auswahl: { zielBranch: 'main', abschluss: 'nichts' },
-    verzeichnis: klon,
-    checks: ['grep -sqx gruen gruen || { echo "nicht gruen"; false; }'],
-    protokoll: '/tmp/runs/20261125-220000-spec-1',
+    choice: { targetBranch: 'main', finish: 'none' },
+    directory: clone,
+    checks: ['grep -sqx green green || { echo "not green"; false; }'],
+    logDir: '/tmp/runs/20261125-220000-spec-1',
     tracker,
     agent: fakeAgent(
-      skript.map((schritt) => (auftrag) => {
-        uhr.vorstellen(10 * MINUTE)
-        return schritt(auftrag)
+      script.map((step) => (request) => {
+        clock.advance(10 * MINUTE)
+        return step(request)
       }),
     ),
-    sandbox: durchreiche,
-    uhr,
-    melde: (e) => ereignisse.push(e),
-    ...eingabe,
+    sandbox: passthrough,
+    clock,
+    report: (e) => events.push(e),
+    ...input,
   })
-  return { ergebnis, ereignisse }
+  return { result, events }
 }
 
-/** Ein Run, der das Ticket grün umsetzt. */
-const gruen: AgentSkript = ({ verzeichnis, ticket }) => {
-  commitDatei(verzeichnis, 'gruen', 'gruen', `Ticket ${ticket.nummer} umsetzen`)
-  return { erfolg: true, sessionId: `sitzung-${ticket.nummer}` }
+/** A session that implements the ticket green. */
+const green: AgentScript = ({ directory, ticket }) => {
+  commitFile(directory, 'green', 'green', `Implement ticket ${ticket.number}`)
+  return { success: true, sessionId: `session-${ticket.number}` }
 }
 
-/** Ein Run, der committet, aber die Checks rot lässt. */
-const rot: AgentSkript = ({ verzeichnis, ticket }) => {
-  commitDatei(verzeichnis, 'gruen', `rot ${Math.random()}`, `Ticket ${ticket.nummer} versuchen`)
-  return { erfolg: true, sessionId: `sitzung-${ticket.nummer}-rot` }
+/** A session that commits but leaves the checks red. */
+const red: AgentScript = ({ directory, ticket }) => {
+  commitFile(directory, 'green', `red ${Math.random()}`, `Try ticket ${ticket.number}`)
+  return { success: true, sessionId: `session-${ticket.number}-red` }
 }
 
-test('ein grünes Ticket bekommt beim Schließen eine Zeile mit Commit, Versuch und Blocks', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2)])
+test('a green ticket gets a line with commit, attempt and blocks when it is closed', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
 
-  await lauf(klon, tracker, [
-    rot,
-    (auftrag) => ({
-      ...gruen(auftrag),
-      blocks: [{ tool: 'Bash', befehl: 'curl https://example.com' }],
+  await run(clone, tracker, [
+    red,
+    (request) => ({
+      ...green(request),
+      blocks: [{ tool: 'Bash', command: 'curl https://example.com' }],
     }),
   ])
 
-  expect(tracker.kommentare(2)).toEqual([
-    `Erledigt: ${git(remote, 'rev-parse', 'spec/1')} in spec/1, Versuch 2 von 3, Blocks: 1`,
+  expect(tracker.comments(2)).toEqual([
+    `Done: ${git(remote, 'rev-parse', 'spec/1')} in spec/1, attempt 2 of 3, blocks: 1`,
   ])
 })
 
-test('ein endgültig gescheitertes Ticket bekommt genau einen Kommentar mit allen Versuchen', async () => {
-  const { klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2)])
-  const check = 'grep -sqx gruen gruen || { seq 1 150; false; }'
+test('a ticket that failed for good gets exactly one comment with all attempts', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
+  const check = 'grep -sqx green green || { seq 1 150; false; }'
 
-  await lauf(
-    klon,
+  await run(
+    clone,
     tracker,
     [
-      rot,
-      () => ({ erfolg: false, blocks: [{ tool: 'Bash', befehl: 'rm -rf /' }] }),
-      (auftrag) => ({ ...rot(auftrag), blocks: [{ tool: 'WebFetch', befehl: 'https://x.org' }] }),
+      red,
+      () => ({ success: false, blocks: [{ tool: 'Bash', command: 'rm -rf /' }] }),
+      (request) => ({ ...red(request), blocks: [{ tool: 'WebFetch', command: 'https://x.org' }] }),
     ],
     { checks: [check] },
   )
 
-  const ausgabe = Array.from({ length: 100 }, (_, i) => i + 51).join('\n')
-  expect(tracker.kommentare(2)).toEqual([
-    `Endgültig gescheitert, jetzt \`ready-for-human\`.
+  const output = Array.from({ length: 100 }, (_, i) => i + 51).join('\n')
+  expect(tracker.comments(2)).toEqual([
+    `Failed for good, now \`ready-for-human\`.
 
-- Versuch 1 von 3 rot: Check: ${check}
-- Versuch 2 von 3 rot: Run erfolgreich
-- Versuch 3 von 3 rot: Check: ${check}
+- Attempt 1 of 3 red: Check: ${check}
+- Attempt 2 of 3 red: Session successful
+- Attempt 3 of 3 red: Check: ${check}
 
-Check-Ausgabe des letzten Versuchs:
+Check output of the last attempt:
 
 \`\`\`
-[gekürzt, vollständig im Protokoll]
-${ausgabe}
+[truncated, full output in the log]
+${output}
 \`\`\`
 
 Blocks: 2
 
-- Session: \`claude --resume sitzung-2-rot\`
-- Rechner: ${hostname()}
-- Protokoll: \`/tmp/runs/20261125-220000-spec-1\``,
+- Session: \`claude --resume session-2-red\`
+- Machine: ${hostname()}
+- Log: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
   expect(tracker.ticket(2)).toMatchObject({ labels: ['ready-for-human'], assignees: [] })
 })
 
-test('scheitert ein Kommentar, warnt die Engine; Schließen und ready-for-human hängen nicht daran', async () => {
-  const { klon } = wegwerfRepo()
+test('if a comment fails, the engine warns; closing and ready-for-human do not depend on it', async () => {
+  const { clone } = throwawayRepo()
   const tracker = new (class extends InMemoryTracker {
-    override async kommentiere(): Promise<void> {
-      throw new Error('gh: nicht erreichbar')
+    override async comment(): Promise<void> {
+      throw new Error('gh: unreachable')
     }
-  })('ich', [ticket(2), ticket(3)])
+  })('me', [ticket(2), ticket(3)])
 
-  const { ergebnis, ereignisse } = await lauf(klon, tracker, [gruen, rot, rot, rot])
+  const { result, events } = await run(clone, tracker, [green, red, red, red])
 
-  expect(ergebnis.tickets.map((t) => t.ergebnis)).toEqual(['erledigt', 'gescheitert'])
-  expect(tracker.ticket(2).offen).toBe(false)
+  expect(result.tickets.map((t) => t.result)).toEqual(['done', 'failed'])
+  expect(tracker.ticket(2).open).toBe(false)
   expect(tracker.ticket(3).labels).toEqual(['ready-for-human'])
-  expect(ereignisse.filter((e) => e.art === 'warnung').map((e) => e.text)).toEqual([
-    'Kommentar an #2 gescheitert: gh: nicht erreichbar',
-    'Kommentar an #3 gescheitert: gh: nicht erreichbar',
-    'Kommentar an #1 gescheitert: gh: nicht erreichbar',
+  expect(events.filter((e) => e.type === 'warning').map((e) => e.text)).toEqual([
+    'Comment on #2 failed: gh: unreachable',
+    'Comment on #3 failed: gh: unreachable',
+    'Comment on #1 failed: gh: unreachable',
   ])
 })
 
-test('die Übersicht nennt den Lauf und je Ticket eine Zeile; die Spec bekommt sie als Kommentar', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [
+test('the summary names the run and one line per ticket; the spec gets it as a comment', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [
     ticket(2),
     ticket(3),
-    ticket(4, { blocker: [{ nummer: 3, offen: true }] }),
+    ticket(4, { blockers: [{ number: 3, open: true }] }),
     ticket(5, { labels: ['ready-for-human'] }),
-    ticket(6, { offen: false }),
+    ticket(6, { open: false }),
   ])
-  const block = (tool: string, befehl: string) => ({ blocks: [{ tool, befehl }] })
+  const block = (tool: string, command: string) => ({ blocks: [{ tool, command }] })
 
-  const { ereignisse } = await lauf(
-    klon,
+  const { events } = await run(
+    clone,
     tracker,
     [
-      rot,
-      (a) => ({ ...gruen(a), ...block('Bash', 'curl https://example.com') }),
-      rot,
-      (a) => ({ ...rot(a), ...block('WebFetch', 'https://x.org') }),
-      (a) => ({ ...rot(a), tokens: { input_tokens: 4711 }, kostenUsd: 1.5 }),
+      red,
+      (a) => ({ ...green(a), ...block('Bash', 'curl https://example.com') }),
+      red,
+      (a) => ({ ...red(a), ...block('WebFetch', 'https://x.org') }),
+      (a) => ({ ...red(a), tokens: { input_tokens: 4711 }, costUsd: 1.5 }),
     ],
     {
-      auswahl: { zielBranch: 'main', abschluss: 'pr' },
-      versionen: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
+      choice: { targetBranch: 'main', finish: 'pr' },
+      versions: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
     },
   )
 
-  const uebersicht = `# Übersicht Spec #1
+  const summary = `# Summary of spec #1
 
-- Beginn: 2026-11-25 22:00:00
-- Ende: 2026-11-25 22:50:00
-- Dauer: 50 min
-- Ziel-Branch: main
-- Abschluss: PR → nichts, weil Tickets offen
-- Versionen: groundhog 1.0.0, claude 2.1.0, skills 1.3.2
+- Start: 2026-11-25 22:00:00
+- End: 2026-11-25 22:50:00
+- Duration: 50 min
+- Target branch: main
+- Finish: PR → nothing, because tickets open
+- Versions: groundhog 1.0.0, claude 2.1.0, skills 1.3.2
 
 ## Tickets
 
-- #2 erledigt · Versuche 2 von 3 · Pausen 0 · Dauer 20 min · Blocks 1 · Commit ${git(remote, 'rev-parse', 'spec/1')}
+- #2 done · Attempts 2 of 3 · Pauses 0 · Duration 20 min · Blocks 1 · Commit ${git(remote, 'rev-parse', 'spec/1')}
   - Bash: \`curl https://example.com\`
-- #3 gescheitert · Versuche 3 von 3 · Pausen 0 · Dauer 30 min · Blocks 1 · rot: Check: grep -sqx gruen gruen || { echo "nicht gruen"; false; } · \`claude --resume sitzung-3-rot\`
+- #3 failed · Attempts 3 of 3 · Pauses 0 · Duration 30 min · Blocks 1 · red: Check: grep -sqx green green || { echo "not green"; false; } · \`claude --resume session-3-red\`
   - WebFetch: \`https://x.org\`
-- #4 blockiert von #3
-- #5 nicht angefasst
-- #6 nicht angefasst, schon geschlossen`
-  expect(ereignisse.at(-1)).toMatchObject({ art: 'lauf-beendet', uebersicht })
-  expect(tracker.kommentare(1)).toEqual([
-    `${uebersicht}
+- #4 blocked by #3
+- #5 not touched
+- #6 not touched, already closed`
+  expect(events.at(-1)).toMatchObject({ type: 'run-finished', summary })
+  expect(tracker.comments(1)).toEqual([
+    `${summary}
 
-- Rechner: ${hostname()}
-- Protokoll: \`/tmp/runs/20261125-220000-spec-1\``,
+- Machine: ${hostname()}
+- Log: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
 })
 
-test('die Übersicht zählt Pausen am Usage-Limit und zeigt ein angehaltenes Ticket als unterbrochen', async () => {
-  const { remote, klon } = wegwerfRepo()
-  const tracker = new InMemoryTracker('ich', [ticket(2), ticket(3)])
+test('the summary counts pauses at the usage limit and shows a halted ticket as interrupted', async () => {
+  const { remote, clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2), ticket(3)])
 
-  const { ereignisse } = await lauf(klon, tracker, [
-    () => ({ erfolg: false, usageLimit: START + 30 * MINUTE }),
-    gruen,
-    () => ({ erfolg: false, usageLimit: 'guthaben' }),
+  const { events } = await run(clone, tracker, [
+    () => ({ success: false, usageLimit: START + 30 * MINUTE }),
+    green,
+    () => ({ success: false, usageLimit: 'credit' }),
   ])
 
-  const ende = ereignisse.at(-1)
-  expect(ende?.art === 'lauf-beendet' && ende.uebersicht.split('\n## Tickets\n\n')[1]).toBe(
-    `- #2 erledigt · Versuche 1 von 3 · Pausen 1 · Dauer 41 min · Blocks 0 · Commit ${git(remote, 'rev-parse', 'spec/1')}
-- #3 unterbrochen · Versuche 1 von 3 · Pausen 0 · Dauer 10 min · Blocks 0`,
+  const end = events.at(-1)
+  expect(end?.type === 'run-finished' && end.summary.split('\n## Tickets\n\n')[1]).toBe(
+    `- #2 done · Attempts 1 of 3 · Pauses 1 · Duration 41 min · Blocks 0 · Commit ${git(remote, 'rev-parse', 'spec/1')}
+- #3 interrupted · Attempts 1 of 3 · Pauses 0 · Duration 10 min · Blocks 0`,
   )
 })

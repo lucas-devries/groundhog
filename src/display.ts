@@ -2,126 +2,126 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
-import { type Hunk, leseStromZeile, wichtigstesArgument } from './claude.ts'
-import { ABSCHLUSS, type Ereignis, integrationBranch } from './engine.ts'
+import { type Hunk, keyArgument, readStreamLine } from './claude.ts'
+import { type Event, FINISH, integrationBranch } from './engine.ts'
 
-export interface AnzeigeOptionen {
-  /** ANSI-Farben; ohne Terminal aus. */
-  farbe?: boolean
-  /** Spalten, auf die eine Zeile gekürzt wird. */
-  breite?: number
-  /** Ordner des Protokolls; die letzte Zeile nennt die Übersicht darin. */
-  protokoll?: string
+export interface DisplayOptions {
+  /** ANSI colours; off without a terminal. */
+  color?: boolean
+  /** Columns a line is truncated to. */
+  width?: number
+  /** Folder of the log; the last line names the summary in it. */
+  logDir?: string
 }
 
 /**
- * Die Anzeige eines Laufs: macht aus jedem Ereignis der Engine die Zeilen, die darunter
- * erscheinen. Ohne Terminal werden sie fortlaufend geschrieben; die Tafel ordnet sie selbst an.
+ * The display of a run: turns every event of the engine into the lines that appear for it.
+ * Without a terminal they are written continuously; the board arranges them itself.
  */
-export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string[] {
-  const { breite = 100 } = optionen
-  const s = stil(optionen.farbe ?? false)
-  const kurz = (t: string, n: number) => {
-    const z = stripVTControlCharacters(t).replace(/\s+/g, ' ').trim()
-    return z.length > n ? `${z.slice(0, n - 1)}…` : z
+export function display(options: DisplayOptions = {}): (e: Event) => string[] {
+  const { width = 100 } = options
+  const s = style(options.color ?? false)
+  const short = (t: string, n: number) => {
+    const l = stripVTControlCharacters(t).replace(/\s+/g, ' ').trim()
+    return l.length > n ? `${l.slice(0, n - 1)}…` : l
   }
 
-  let begonnen: Extract<Ereignis, { art: 'lauf-begonnen' }> | undefined
+  let started: Extract<Event, { type: 'run-started' }> | undefined
   let integration = ''
-  let uebernommen = 0
-  let stand: string | undefined
+  let integrated = 0
+  let head: string | undefined
 
   return (e) => {
-    switch (e.art) {
-      case 'run-ausgabe':
-        return mitschrift(e.zeile).flatMap((m) => {
-          if (m.art === 'text')
-            return m.text
+    switch (e.type) {
+      case 'session-output':
+        return transcript(e.line).flatMap((t) => {
+          if (t.kind === 'text')
+            return t.text
               .split('\n')
-              .filter((t) => t.trim())
-              .map((t) => `  │ ${kurz(t, breite - 4)}`)
-          if (m.art === 'tool') {
-            const argument = kurz(m.argument, breite - 8 - m.name.length)
-            return [`  │ ${s.cyan('⏺')} ${s.fett(m.name)} ${s.matt(argument)}`]
+              .filter((l) => l.trim())
+              .map((l) => `  │ ${short(l, width - 4)}`)
+          if (t.kind === 'tool') {
+            const argument = short(t.argument, width - 8 - t.name.length)
+            return [`  │ ${s.cyan('⏺')} ${s.bold(t.name)} ${s.dim(argument)}`]
           }
-          if (m.art === 'ergebnis') {
-            return [`  │   ${(m.fehler ? s.rot : s.matt)(`⎿ ${kurz(m.text, breite - 8)}`)}`]
+          if (t.kind === 'result') {
+            return [`  │   ${(t.error ? s.red : s.dim)(`⎿ ${short(t.text, width - 8)}`)}`]
           }
-          return diff(m, breite - 6, s).map((z) => `  │   ${z}`)
+          return diff(t, width - 6, s).map((l) => `  │   ${l}`)
         })
-      case 'lauf-begonnen': {
-        begonnen = e
+      case 'run-started': {
+        started = e
         integration = integrationBranch(e.spec)
-        const version = e.versionen.groundhog ? ` ${e.versionen.groundhog}` : ''
-        const abschluss = ABSCHLUSS[e.auswahl.abschluss]
+        const version = e.versions.groundhog ? ` ${e.versions.groundhog}` : ''
+        const finish = FINISH[e.choice.finish]
         return [
-          s.matt(
-            `groundhog${version} · Spec #${e.spec} · Ziel-Branch ${e.auswahl.zielBranch} · Abschluss ${abschluss}`,
+          s.dim(
+            `groundhog${version} · Spec #${e.spec} · target branch ${e.choice.targetBranch} · finish ${finish}`,
           ),
         ]
       }
-      case 'ticket-genommen':
-        return ['', s.fett(`━━ #${e.ticket} genommen`)]
-      case 'versuch-begonnen':
-        return [`  ${s.cyan('▶')} Versuch ${e.versuch} von ${e.von}`]
-      case 'run-beendet':
-        // Die Begründung eines Blocks steht nur im Protokoll.
+      case 'ticket-taken':
+        return ['', s.bold(`━━ #${e.ticket} taken`)]
+      case 'attempt-started':
+        return [`  ${s.cyan('▶')} Attempt ${e.attempt} of ${e.of}`]
+      case 'session-finished':
+        // The reason of a block is only in the log.
         return (e.blocks ?? []).map((b) =>
-          s.gelb(`  ⛔ Block: ${kurz(`${b.tool} ${b.befehl}`, breite - 11)}`),
+          s.yellow(`  ⛔ Block: ${short(`${b.tool} ${b.command}`, width - 11)}`),
         )
-      case 'pruefung':
-        return [`  ${e.ok ? s.gruen('✔') : s.rot('✘')} ${e.name}`]
+      case 'verification':
+        return [`  ${e.ok ? s.green('✔') : s.red('✘')} ${e.name}`]
       case 'pause':
-        return [s.gelb(`  ⏸ Usage-Limit erreicht, Pause bis ${uhrzeit(e.reset, e.zeit)}`)]
+        return [s.yellow(`  ⏸ Usage limit reached, pause until ${timeOfDay(e.reset, e.time)}`)]
       case 'push':
-        // Der Abschluss pusht auch in den Ziel-Branch; der Stand gilt nur dem Integration-Branch.
-        if (e.branch === integration) stand = e.commit
-        return [s.matt(`  ↑ ${e.branch} gepusht: ${e.commit.slice(0, 7)}`)]
-      case 'ticket-erledigt':
-        uebernommen++
+        // The finish pushes to the target branch too; the head only tracks the integration branch.
+        if (e.branch === integration) head = e.commit
+        return [s.dim(`  ↑ ${e.branch} pushed: ${e.commit.slice(0, 7)}`)]
+      case 'ticket-done':
+        integrated++
         return [
-          `${s.gruen('✔')} ${s.fett(`#${e.ticket} erledigt`)} in Versuch ${e.versuche} · Commit ${e.commit.slice(0, 7)}`,
+          `${s.green('✔')} ${s.bold(`#${e.ticket} done`)} in attempt ${e.attempts} · commit ${e.commit.slice(0, 7)}`,
         ]
-      case 'ticket-gescheitert':
+      case 'ticket-failed':
         return [
-          `${s.rot('✘')} ${s.fett(`#${e.ticket} endgültig gescheitert`)} nach ${e.versuche} Versuchen (rot: ${e.pruefung}) → ready-for-human`,
+          `${s.red('✘')} ${s.bold(`#${e.ticket} failed for good`)} after ${e.attempts} attempts (red: ${e.verification}) → ready-for-human`,
         ]
-      case 'warnung':
-        return [s.gelb(`⚠ ${e.text}`)]
-      case 'lauf-angehalten':
+      case 'warning':
+        return [s.yellow(`⚠ ${e.text}`)]
+      case 'run-halted':
         return [
-          s.rot(
-            `■ Lauf angehalten an #${e.ticket}: Usage-Limit ohne Reset-Zeit, weiter erst mit Guthaben`,
+          s.red(
+            `■ Run halted at #${e.ticket}: usage limit without reset time, continues only with credit`,
           ),
         ]
-      case 'lauf-beendet': {
-        const spec = begonnen?.spec
-        const ziel = begonnen?.auswahl.zielBranch
-        const wahl = `Abschluss ${begonnen ? ABSCHLUSS[begonnen.auswahl.abschluss] : ''}`
-        const a = e.abschluss
-        const abschluss =
-          a.art === 'gemergt'
-            ? `${wahl}: ${integration} nach ${ziel} gemergt, Merge-Commit ${a.commit.slice(0, 7)}, Spec #${spec} geschlossen`
-            : a.art === 'konflikt'
-              ? `${wahl}: Konflikt mit ${ziel}, ${integration} bleibt stehen`
-              : a.art === 'pr'
-                ? `${wahl}: ${a.url}`
-                : a.art === 'nichts'
-                  ? `${wahl}: ${integration} bleibt stehen`
-                  : `${wahl} entfällt, weil ${a.grund === 'abgebrochen' ? 'der Lauf abgebrochen wurde' : `${a.grund} sind`}. Nächster Lauf: groundhog ${spec}`
+      case 'run-finished': {
+        const spec = started?.spec
+        const target = started?.choice.targetBranch
+        const choice = `Finish ${started ? FINISH[started.choice.finish] : ''}`
+        const f = e.finish
+        const finish =
+          f.type === 'merged'
+            ? `${choice}: ${integration} merged into ${target}, merge commit ${f.commit.slice(0, 7)}, spec #${spec} closed`
+            : f.type === 'conflict'
+              ? `${choice}: conflict with ${target}, ${integration} stays`
+              : f.type === 'pr'
+                ? `${choice}: ${f.url}`
+                : f.type === 'none'
+                  ? `${choice}: ${integration} stays`
+                  : `${choice} skipped because ${f.reason === 'aborted' ? 'the run was aborted' : 'tickets are open'}. Next run: groundhog ${spec}`
         const tickets =
-          uebernommen === 0
-            ? 'keine Tickets übernommen'
-            : `${uebernommen} Ticket${uebernommen === 1 ? '' : 's'} übernommen, Stand ${stand?.slice(0, 7)}`
-        const { protokoll } = optionen
+          integrated === 0
+            ? 'no tickets integrated'
+            : `${integrated} ticket${integrated === 1 ? '' : 's'} integrated, head ${head?.slice(0, 7)}`
+        const { logDir } = options
         return [
           '',
-          ...e.uebersicht.split('\n'),
+          ...e.summary.split('\n'),
           '',
-          `Integration-Branch ${integration}: ${tickets}`,
-          a.art === 'konflikt' ? s.rot(abschluss) : abschluss,
-          s.matt(`Rechner: ${hostname()}${protokoll ? ` · Protokoll: ${protokoll}` : ''}`),
-          ...(protokoll ? [`Übersicht: ${join(protokoll, 'summary.md')}`] : []),
+          `Integration branch ${integration}: ${tickets}`,
+          f.type === 'conflict' ? s.red(finish) : finish,
+          s.dim(`Machine: ${hostname()}${logDir ? ` · Log: ${logDir}` : ''}`),
+          ...(logDir ? [`Summary: ${join(logDir, 'summary.md')}`] : []),
         ]
       }
       default:
@@ -130,111 +130,109 @@ export function anzeige(optionen: AnzeigeOptionen = {}): (e: Ereignis) => string
   }
 }
 
-/** HH:MM in lokaler Zeit; liegt `ms` an einem anderen Tag als `jetzt`, mit Datum davor. */
-export function uhrzeit(ms: number, jetzt: number): string {
+/** HH:MM in local time; if `ms` is on another day than `now`, with the date in front. */
+export function timeOfDay(ms: number, now: number): string {
   const d = new Date(ms)
-  const zeit = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-  if (d.toDateString() === new Date(jetzt).toDateString()) return zeit
-  return `${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} ${zeit}`
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  if (d.toDateString() === new Date(now).toDateString()) return time
+  return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })} ${time}`
 }
 
-type Stil = ReturnType<typeof stil>
-const syntaxfarben = createEmphasize(common)
+type Style = ReturnType<typeof style>
+const syntaxColors = createEmphasize(common)
 
-export function stil(farbe: boolean) {
-  const ansi = (code: number) => (t: string) => (farbe ? `\x1b[${code}m${t}\x1b[0m` : t)
+export function style(color: boolean) {
+  const ansi = (code: number) => (t: string) => (color ? `\x1b[${code}m${t}\x1b[0m` : t)
   return {
-    fett: ansi(1),
-    matt: ansi(2),
-    rot: ansi(31),
-    gruen: ansi(32),
-    gelb: ansi(33),
+    bold: ansi(1),
+    dim: ansi(2),
+    red: ansi(31),
+    green: ansi(32),
+    yellow: ansi(33),
     cyan: ansi(36),
-    /** Syntaxfarben nach der Endung der Datei. */
-    code: (datei: string, t: string) => {
-      const sprache = extname(datei).slice(1)
-      return farbe && sprache && syntaxfarben.registered(sprache)
-        ? syntaxfarben.highlight(sprache, t).value
+    /** Syntax colours by the file's extension. */
+    code: (file: string, t: string) => {
+      const language = extname(file).slice(1)
+      return color && language && syntaxColors.registered(language)
+        ? syntaxColors.highlight(language, t).value
         : t
     },
   }
 }
 
-type Mitschrift =
-  | { art: 'text'; text: string }
-  | { art: 'tool'; name: string; argument: string }
-  | { art: 'ergebnis'; text: string; fehler: boolean }
-  | { art: 'diff'; datei: string; hunks: Hunk[] }
+type Transcript =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; argument: string }
+  | { kind: 'result'; text: string; error: boolean }
+  | { kind: 'diff'; file: string; hunks: Hunk[] }
 
 const DIFF_MAX = 12
 
-/** Ein Diff wie im Claude-Code-Fenster: Zusammenfassung, Zeilennummern, `+`/`-`. */
-// ponytail: jede Zeile wird einzeln eingefärbt, mehrzeilige Strings und Kommentare stimmen dann
-// nicht; für genaue Farben die ganze Datei einfärben.
-function diff(d: { datei: string; hunks: Hunk[] }, breite: number, s: Stil): string[] {
-  const alle = d.hunks.flatMap((h) => h.lines)
-  const zahl = (z: string) => alle.filter((l) => l[0] === z).length
-  const plus = zahl('+')
-  const zeilen: string[] = []
+/** A diff as in the Claude Code window: summary, line numbers, `+`/`-`. */
+// ponytail: each line is coloured on its own, so multi-line strings and comments come out wrong;
+// for exact colours, colour the whole file.
+function diff(d: { file: string; hunks: Hunk[] }, width: number, s: Style): string[] {
+  const all = d.hunks.flatMap((h) => h.lines)
+  const count = (c: string) => all.filter((l) => l[0] === c).length
+  const plus = count('+')
+  const lines: string[] = []
   for (const h of d.hunks) {
-    let alt = h.oldStart
-    let neu = h.newStart
+    let oldNr = h.oldStart
+    let newNr = h.newStart
     for (const l of h.lines) {
       const code = stripVTControlCharacters(l.slice(1))
         .replace(/\r/g, '')
-        .slice(0, breite - 9)
+        .slice(0, width - 9)
       const nr = (n: number) => String(n).padStart(4)
-      if (l[0] === '+') zeilen.push(`${s.gruen(`${nr(neu++)} +`)} ${s.code(d.datei, code)}`)
-      else if (l[0] === '-') zeilen.push(`${s.rot(`${nr(alt++)} -`)} ${s.matt(code)}`)
+      if (l[0] === '+') lines.push(`${s.green(`${nr(newNr++)} +`)} ${s.code(d.file, code)}`)
+      else if (l[0] === '-') lines.push(`${s.red(`${nr(oldNr++)} -`)} ${s.dim(code)}`)
       else {
-        zeilen.push(`${s.matt(`${nr(neu++)}  `)} ${s.code(d.datei, code)}`)
-        alt++
+        lines.push(`${s.dim(`${nr(newNr++)}  `)} ${s.code(d.file, code)}`)
+        oldNr++
       }
     }
   }
   return [
-    s.matt(`⎿ ${plus} Zeile${plus === 1 ? '' : 'n'} hinzugefügt, ${zahl('-')} entfernt`),
-    ...zeilen.slice(0, DIFF_MAX).map((z) => `  ${z}`),
-    ...(zeilen.length > DIFF_MAX
-      ? [s.matt(`       … ${zeilen.length - DIFF_MAX} weitere Zeilen`)]
-      : []),
+    s.dim(`⎿ ${plus} line${plus === 1 ? '' : 's'} added, ${count('-')} removed`),
+    ...lines.slice(0, DIFF_MAX).map((l) => `  ${l}`),
+    ...(lines.length > DIFF_MAX ? [s.dim(`       … ${lines.length - DIFF_MAX} more lines`)] : []),
   ]
 }
 
-/** Liest eine Zeile `stream-json`; was keine Mitschrift ist (auch kein JSON), ergibt nichts. */
-function mitschrift(zeile: string): Mitschrift[] {
-  const z = leseStromZeile(zeile)
-  const inhalte =
-    typeof z?.message === 'object' && Array.isArray(z.message.content) ? z.message.content : []
-  const aus: Mitschrift[] = []
-  for (const c of inhalte) {
-    if (z?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
-      aus.push({ art: 'text', text: c.text })
+/** Reads a line of `stream-json`; whatever isn't transcript (including non-JSON) gives nothing. */
+function transcript(line: string): Transcript[] {
+  const l = readStreamLine(line)
+  const contents =
+    typeof l?.message === 'object' && Array.isArray(l.message.content) ? l.message.content : []
+  const out: Transcript[] = []
+  for (const c of contents) {
+    if (l?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
+      out.push({ kind: 'text', text: c.text })
     }
-    if (z?.type === 'assistant' && c.type === 'tool_use') {
-      const argument = wichtigstesArgument(c.input) ?? ''
-      aus.push({ art: 'tool', name: c.name ?? '?', argument })
+    if (l?.type === 'assistant' && c.type === 'tool_use') {
+      const argument = keyArgument(c.input) ?? ''
+      out.push({ kind: 'tool', name: c.name ?? '?', argument })
     }
-    if (z?.type === 'user' && c.type === 'tool_result') {
-      const r = z.tool_use_result
+    if (l?.type === 'user' && c.type === 'tool_result') {
+      const r = l.tool_use_result
       let hunks = Array.isArray(r?.structuredPatch) ? r.structuredPatch : []
       if (hunks.length === 0 && r?.type === 'create' && typeof r.content === 'string') {
         const lines = r.content
           .replace(/\n$/, '')
           .split('\n')
-          .map((l) => `+${l}`)
+          .map((x) => `+${x}`)
         hunks = [{ oldStart: 1, newStart: 1, lines }]
       }
       if (hunks.length > 0) {
-        aus.push({ art: 'diff', datei: r?.filePath ?? '', hunks })
+        out.push({ kind: 'diff', file: r?.filePath ?? '', hunks })
         continue
       }
       const text =
         typeof c.content === 'string'
           ? c.content
           : (c.content ?? []).map((x) => x.text ?? '').join(' ')
-      aus.push({ art: 'ergebnis', text, fehler: c.is_error === true })
+      out.push({ kind: 'result', text, error: c.is_error === true })
     }
   }
-  return aus
+  return out
 }
