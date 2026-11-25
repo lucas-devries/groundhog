@@ -133,11 +133,13 @@ test('die Start-Prüfung meldet fehlende Labels, die Zahl der Sub-Issues und den
     fehlendeLabels: [],
     subIssues: 19,
     defaultBranch: 'main',
+    url: 'https://github.com/lucas-devries/groundhog',
   })
   expect(await tracker.startPruefung(32)).toEqual({
     fehlendeLabels: ['ready-for-human'],
     subIssues: 0,
     defaultBranch: 'main',
+    url: 'https://github.com/lucas-devries/groundhog',
   })
 })
 

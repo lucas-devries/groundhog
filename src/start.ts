@@ -1,0 +1,270 @@
+import { spawnSync } from 'node:child_process'
+import type { Auswahl } from './engine.ts'
+import { git } from './git.ts'
+import { GitHubTracker } from './github.ts'
+import { type Konfiguration, leseKonfiguration } from './konfiguration.ts'
+import { type SrtSandbox, sandboxFehlt, srtSandbox } from './sandbox.ts'
+import { nimmSperre } from './sperre.ts'
+
+type Abgebrochen = symbol
+
+/** Die Teile von `@clack/prompts`, die das Menü braucht; ein Symbol als Antwort heißt Strg+C. */
+export interface MenueDialog {
+  note(text: string, titel: string): void
+  warn(text: string): void
+  outro(text: string): void
+  select(o: {
+    message: string
+    options: { value: string; label: string; hint?: string }[]
+    initialValue: string
+  }): Promise<string | Abgebrochen>
+  confirm(o: {
+    message: string
+    initialValue: boolean
+    active: string
+    inactive: string
+  }): Promise<boolean | Abgebrochen>
+}
+
+export interface StartOptionen {
+  /** Ein Verzeichnis im Klon. */
+  verzeichnis: string
+  spec: number
+  dialog: MenueDialog
+  /** stdin ist ein Terminal. */
+  istTerminal: boolean
+  /** Was der Sandbox zum Start fehlt; leer heißt startbar. */
+  sandboxFehlt?: () => string[]
+}
+
+/** Alles, was der Lauf nach dem Menü braucht. */
+export interface Bereit {
+  ok: true
+  /** Repo-Root des Klons. */
+  verzeichnis: string
+  konfiguration: Konfiguration
+  auswahl: Auswahl
+  tracker: GitHubTracker
+  /** Das `gh`-Token. */
+  token: string
+  repoUrl: string
+  /** Die `srt`-Sandbox; `undefined` nur bei `sandbox.aus`. */
+  sandbox: SrtSandbox | undefined
+  versionen: Record<string, string>
+  /** Gibt die Sperre frei; bei jedem Ende aufrufen. */
+  freigeben: () => void
+}
+
+export type Start = Bereit | { ok: false; exitCode: number; meldung: string }
+
+const NICHTS_VERAENDERT = 'Abgebrochen. Nichts wurde verändert.'
+
+class Abbruch extends Error {
+  constructor(
+    meldung: string,
+    readonly exitCode = 1,
+  ) {
+    super(meldung)
+  }
+}
+
+/**
+ * Start eines Laufs bis zum Ende des Menüs: Start-Prüfungen, Sperre, Menü. Verändert weder Repo
+ * noch Tracker; bei jedem Abbruch ist die Sperre wieder frei.
+ */
+export async function starte({
+  verzeichnis: aufruf,
+  spec,
+  dialog,
+  istTerminal,
+  sandboxFehlt: fehlt = sandboxFehlt,
+}: StartOptionen): Promise<Start> {
+  let freigeben = () => {}
+  try {
+    const versionen: Record<string, string> = {}
+    werkzeug(aufruf, 'git', ['--version'])
+    let verzeichnis: string
+    try {
+      verzeichnis = git(aufruf, 'rev-parse', '--show-toplevel')
+    } catch {
+      throw new Abbruch('groundhog muss in einem Git-Repo laufen.')
+    }
+    const ghVersion = werkzeug(verzeichnis, 'gh', ['--version'])
+    const [major = 0, minor = 0] = (ghVersion.match(/gh version (\d+)\.(\d+)/) ?? [])
+      .slice(1)
+      .map(Number)
+    if (major < 2 || (major === 2 && minor < 94)) {
+      throw new Abbruch(`gh ist zu alt (${ghVersion.split('\n')[0]}); nötig ist 2.94 oder neuer.`)
+    }
+    const token = werkzeug(verzeichnis, 'gh', ['auth', 'token'], () => {
+      throw new Abbruch('gh ist nicht angemeldet. Melde dich mit `gh auth login` an.')
+    })
+    versionen.claude = werkzeug(verzeichnis, 'claude', ['--version'])
+
+    const gelesen = leseKonfiguration(verzeichnis)
+    if (!gelesen.ok) throw new Abbruch(gelesen.fehler.join('\n'))
+    const konfiguration = gelesen.konfiguration
+
+    const sperre = nimmSperre(verzeichnis, spec, Date.now())
+    if (!sperre.ok) throw new Abbruch(sperre.meldung)
+    freigeben = sperre.freigeben
+
+    if (git(verzeichnis, 'status', '--porcelain') !== '') {
+      throw new Abbruch(
+        'Das Arbeitsverzeichnis ist nicht sauber. Committe oder verwirf die Änderungen.',
+      )
+    }
+    git(verzeichnis, 'fetch', '-q', '--prune', 'origin')
+    const stoerend = git(
+      verzeichnis,
+      'for-each-ref',
+      '--format=%(refname:short)',
+      'refs/heads/spec',
+      'refs/heads/ticket',
+      'refs/remotes/origin/spec',
+      'refs/remotes/origin/ticket',
+    )
+    if (stoerend) {
+      throw new Abbruch(
+        `Es gibt einen Branch ${stoerend.split('\n').join(', ')}. Er stört spec/* und ticket/*; benenne ihn um.`,
+      )
+    }
+    const fehlend = konfiguration.zielBranches.filter(
+      (b) => !git(verzeichnis, 'for-each-ref', `refs/remotes/origin/${b}`),
+    )
+    if (fehlend.length > 0) {
+      throw new Abbruch(`Ziel-Branch fehlt auf dem Remote: ${fehlend.join(', ')}`)
+    }
+
+    const tracker = await GitHubTracker.verbinde({ verzeichnis })
+    const pruefung = await tracker.startPruefung(spec)
+    if (pruefung.fehlendeLabels.length > 0) {
+      throw new Abbruch(
+        `Im Repo fehlt das Label ${pruefung.fehlendeLabels.join(' und ')}. Lege es auf GitHub an.`,
+      )
+    }
+    if (pruefung.subIssues === 0) {
+      throw new Abbruch(
+        `Spec #${spec} hat keine Sub-Issues. groundhog nimmt als Tickets nur native Sub-Issues; ` +
+          '„Part of #n“ im Text zählt nicht. Verknüpfe die Tickets in der Spec auf GitHub unter ' +
+          '„Sub-issues“ (Add existing issue).',
+      )
+    }
+
+    let sandbox: SrtSandbox | undefined
+    if (!konfiguration.sandbox.aus) {
+      const was = fehlt()
+      if (was.length > 0) {
+        throw new Abbruch(
+          `Die Sandbox ist an, startet aber nicht:\n${was.map((w) => `- ${w}`).join('\n')}`,
+        )
+      }
+      sandbox = srtSandbox(konfiguration.sandbox.hosts)
+    }
+
+    if (!istTerminal) throw new Abbruch('groundhog braucht ein Terminal an stdin für das Menü.')
+
+    const auswahl = await menue(dialog, spec, konfiguration, await tracker.taskGraph(spec))
+    return {
+      ok: true,
+      verzeichnis,
+      konfiguration,
+      auswahl,
+      tracker,
+      token,
+      repoUrl: pruefung.url,
+      sandbox,
+      versionen,
+      freigeben,
+    }
+  } catch (fehler) {
+    freigeben()
+    const exitCode = fehler instanceof Abbruch ? fehler.exitCode : 1
+    return { ok: false, exitCode, meldung: (fehler as Error).message }
+  }
+}
+
+/** Führt ein Werkzeug aus und liefert stdout; fehlt es im `PATH`, bricht der Start ab. */
+function werkzeug(
+  verzeichnis: string,
+  name: string,
+  args: string[],
+  gescheitert = (stderr: string): never => {
+    throw new Abbruch(`${name} ${args.join(' ')} ist gescheitert: ${stderr}`)
+  },
+): string {
+  const lauf = spawnSync(name, args, { cwd: verzeichnis, encoding: 'utf8' })
+  if ((lauf.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    throw new Abbruch(`${name} fehlt im PATH. groundhog braucht git, gh und claude.`)
+  }
+  if (lauf.status !== 0) gescheitert(lauf.stderr.trim())
+  return lauf.stdout.trim()
+}
+
+async function menue(
+  dialog: MenueDialog,
+  spec: number,
+  konfiguration: Konfiguration,
+  tickets: Awaited<ReturnType<GitHubTracker['taskGraph']>>,
+): Promise<Auswahl> {
+  const integration = `spec/${spec}`
+  const mensch = tickets.filter((t) => t.labels.includes('ready-for-human'))
+  const freigegeben = tickets.filter(
+    (t) => t.offen && t.labels.includes('ready-for-agent') && !mensch.includes(t),
+  )
+  const { sandbox } = konfiguration
+  dialog.note(
+    [
+      `Spec #${spec}`,
+      `${tickets.length} Tickets, davon ${freigegeben.length} für den Agent freigegeben`,
+      ...mensch.map((t) => `#${t.nummer}: ready-for-human, wird nicht angefasst`),
+      `Checks: ${konfiguration.checks.join(' · ')}`,
+      `Sandbox: ${sandbox.aus ? 'aus' : 'an (srt)'}`,
+      `Versuche pro Ticket: ${konfiguration.versuche}`,
+    ].join('\n'),
+    'Dieser Lauf',
+  )
+  if (sandbox.aus) {
+    dialog.warn(
+      'Die Sandbox ist aus: Runs laufen im Auto-Mode ohne Grenzen auf diesem Rechner, mit deinem gh-Token.',
+    )
+  }
+  const antwort = <T>(wert: T | Abgebrochen): T => {
+    if (typeof wert === 'symbol') throw new Abbruch(NICHTS_VERAENDERT, 130)
+    return wert
+  }
+  const zielBranch = antwort(
+    await dialog.select({
+      message: 'Ziel-Branch: Wohin fließt die Arbeit am Ende?',
+      options: konfiguration.zielBranches.map((b) => ({ value: b, label: b })),
+      initialValue: konfiguration.zielBranches[0] ?? '',
+    }),
+  )
+  const abschluss = antwort(
+    await dialog.select({
+      message: `Abschluss: Was geschieht mit ${integration}, sobald alle Tickets geschlossen sind?`,
+      options: [
+        { value: 'mergen', label: 'Mergen', hint: `groundhog mergt nach ${zielBranch} und pusht` },
+        { value: 'pr', label: 'PR', hint: `groundhog öffnet einen PR nach ${zielBranch}` },
+        { value: 'nichts', label: 'Nichts', hint: `${integration} bleibt stehen` },
+      ],
+      initialValue: zielBranch === 'main' ? 'pr' : 'mergen',
+    }),
+  ) as Auswahl['abschluss']
+  if (zielBranch === 'main' && abschluss === 'mergen') {
+    dialog.warn(
+      `Sind am Ende alle Tickets geschlossen, mergt groundhog ${integration} nach main und pusht, ohne nachzufragen.`,
+    )
+    const ja = antwort(
+      await dialog.confirm({
+        message: 'Ohne weitere Rückfrage nach main mergen?',
+        initialValue: false,
+        active: 'Ja',
+        inactive: 'Nein',
+      }),
+    )
+    if (!ja) throw new Abbruch(NICHTS_VERAENDERT)
+  }
+  dialog.outro('Ab hier ist keine Eingabe mehr nötig.')
+  return { zielBranch, abschluss }
+}

@@ -31,6 +31,7 @@ const TASK_GRAPH = `query($owner: String!, $repo: String!, $spec: Int!) {
 
 const START_PRUEFUNG = `query($owner: String!, $repo: String!, $spec: Int!) {
   repository(owner: $owner, name: $repo) {
+    url
     defaultBranchRef { name }
     agent: label(name: "ready-for-agent") { name }
     human: label(name: "ready-for-human") { name }
@@ -55,6 +56,8 @@ export interface StartPruefung {
   fehlendeLabels: string[]
   subIssues: number
   defaultBranch: string
+  /** `https://github.com/<owner>/<repo>` */
+  url: string
 }
 
 export interface Verbindung {
@@ -99,6 +102,7 @@ export class GitHubTracker implements Tracker {
       ],
       subIssues: r.issue.subIssues.totalCount,
       defaultBranch: r.defaultBranchRef.name,
+      url: r.url,
     }
   }
 

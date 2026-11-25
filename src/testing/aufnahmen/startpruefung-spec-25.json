@@ -1,6 +1,7 @@
 {
   "data": {
     "repository": {
+      "url": "https://github.com/lucas-devries/groundhog",
       "defaultBranchRef": { "name": "main" },
       "agent": { "name": "ready-for-agent" },
       "human": { "name": "ready-for-human" },
