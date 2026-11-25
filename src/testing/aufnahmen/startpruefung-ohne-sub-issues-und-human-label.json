@@ -1,0 +1,10 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": { "name": "main" },
+      "agent": { "name": "ready-for-agent" },
+      "human": null,
+      "issue": { "subIssues": { "totalCount": 0 } }
+    }
+  }
+}
