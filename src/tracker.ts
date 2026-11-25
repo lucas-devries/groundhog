@@ -18,12 +18,30 @@ export interface Tracker {
   readonly nutzer: string
   taskGraph(spec: number): Promise<Ticket[]>
   beanspruche(ticket: number): Promise<void>
-  schliesse(ticket: number): Promise<void>
+  /** Schließt ein Ticket oder die Spec. */
+  schliesse(issue: number): Promise<void>
+  kommentiere(issue: number, text: string): Promise<void>
+  /** Legt einen PR an und liefert seine URL. */
+  erstellePr(pr: Pr): Promise<string>
+}
+
+export interface Pr {
+  /** Branch mit der Arbeit. */
+  kopf: string
+  /** Branch, in den der PR mergt. */
+  basis: string
+  titel: string
+  body: string
 }
 
 /** Tracker im Speicher für Tests. `nutzer` spielt den angemeldeten `gh`-Nutzer. */
 export class InMemoryTracker implements Tracker {
   readonly #tickets: Ticket[]
+  /** Geschlossene Issues außerhalb der Tickets, etwa die Spec. */
+  readonly #geschlossen = new Set<number>()
+  readonly #kommentare = new Map<number, string[]>()
+  /** Angelegte PRs in Reihenfolge. */
+  readonly prs: Pr[] = []
 
   constructor(
     readonly nutzer: string,
@@ -35,6 +53,15 @@ export class InMemoryTracker implements Tracker {
   /** Stand eines Tickets, als Kopie. */
   ticket(nummer: number): Ticket {
     return structuredClone(this.#finde(nummer))
+  }
+
+  /** Ob ein Ticket oder ein anderes Issue (etwa die Spec) offen ist. */
+  offen(nummer: number): boolean {
+    return this.#tickets.find((t) => t.nummer === nummer)?.offen ?? !this.#geschlossen.has(nummer)
+  }
+
+  kommentare(nummer: number): string[] {
+    return [...(this.#kommentare.get(nummer) ?? [])]
   }
 
   /** Ändert ein Ticket von außen, wie ein Mensch im Tracker während des Laufs. */
@@ -59,7 +86,18 @@ export class InMemoryTracker implements Tracker {
   }
 
   async schliesse(nummer: number) {
-    this.#finde(nummer).offen = false
+    const ticket = this.#tickets.find((t) => t.nummer === nummer)
+    if (ticket) ticket.offen = false
+    else this.#geschlossen.add(nummer)
+  }
+
+  async kommentiere(nummer: number, text: string) {
+    this.#kommentare.set(nummer, [...this.kommentare(nummer), text])
+  }
+
+  async erstellePr(pr: Pr) {
+    this.prs.push(pr)
+    return `https://github.example/pull/${this.prs.length}`
   }
 
   #finde(nummer: number): Ticket {
