@@ -76,6 +76,10 @@ _Avoid_: Workflow, Pipeline
 Eine deterministische Prüfung (Typen, Lint, Tests), die ein Ticket bestehen muss, bevor es als erledigt gilt.
 _Avoid_: Gate, Validierung
 
+**Prüfung**:
+Eine der Bedingungen, an denen die Engine nach einem Run entscheidet, ob ein Versuch grün ist: Run erfolgreich, `HEAD` auf dem Ticket-Branch, ein neuer Commit, sauberes Arbeitsverzeichnis, dazu jeder Check.
+_Avoid_: Test, Gate
+
 **Projekt-Konfiguration**:
 Die Einstellungen, die ein Projekt für alle seine Läufe festlegt.
 _Avoid_: Repo-Konfiguration, Config, Settings
