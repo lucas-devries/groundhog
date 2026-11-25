@@ -42,6 +42,8 @@ const TOKEN = { ausgabe: 'gho_geheim\n' }
 const NUTZER = { ausgabe: 'lucas\n' }
 
 const CLAUDE_VERSION: ClaudeAntwort = { aufnahme: 'claude-version.txt' }
+/** `claude auth status` eines angemeldeten `claude`. */
+const ANGEMELDET: ClaudeAntwort = {}
 const MIT_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-mit-skills.jsonl' }
 const OHNE_SKILLS: ClaudeAntwort = { aufnahme: 'claude-init-ohne-skills.jsonl' }
 
@@ -59,7 +61,7 @@ const KONFIGURATION = {
 function bereit({
   gh = [GH_VERSION, TOKEN, NUTZER, aufnahme('startpruefung-spec-25.json')],
   konfiguration = KONFIGURATION as object | null,
-  claude = [CLAUDE_VERSION, MIT_SKILLS] as ClaudeAntwort[] | null,
+  claude = [CLAUDE_VERSION, ANGEMELDET, MIT_SKILLS] as ClaudeAntwort[] | null,
   ohne = [] as string[],
 } = {}) {
   const { klon } = wegwerfRepo()
@@ -447,6 +449,11 @@ const FAELLE: Fall[] = [
   },
   { grund: 'claude fehlt', bereit: { claude: null }, meldung: ['claude fehlt im PATH'] },
   {
+    grund: 'claude nicht angemeldet ist',
+    bereit: { claude: [CLAUDE_VERSION, { exitCode: 1 }] },
+    meldung: ['claude ist nicht angemeldet', 'claude auth login'],
+  },
+  {
     grund: 'die Projekt-Konfiguration fehlt',
     bereit: { konfiguration: null },
     meldung: ['groundhog.json fehlt', 'groundhog init'],
@@ -547,7 +554,7 @@ const INSTALLATION =
 const USAGE = ['-p', '/usage', '--output-format', 'stream-json', '--verbose']
 
 test('fehlen die Skills, fragt das Menü nach der Installation; Nein bricht mit dem Befehl ab', async () => {
-  const { klon, claude, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+  const { klon, claude, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
 
   const { ergebnis, gezeigt } = await start({ klon, pfad }, [false])
 
@@ -565,11 +572,11 @@ test('fehlen die Skills, fragt das Menü nach der Installation; Nein bricht mit 
   expect(ergebnis.exitCode).toBe(1)
   expect(ergebnis.meldung).toContain(INSTALLATION)
   expect(existsSync(sperre(klon))).toBe(false)
-  expect(claude?.aufrufe().map((a) => a.args)).toEqual([['--version'], USAGE])
+  expect(claude?.aufrufe().map((a) => a.args)).toEqual([['--version'], ['auth', 'status'], USAGE])
 })
 
 test('ohne Terminal und ohne Skills bricht der Start mit dem Installationsbefehl ab', async () => {
-  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
 
   const { ergebnis, gezeigt } = await start({ klon, pfad }, [], { istTerminal: false })
 
@@ -579,13 +586,14 @@ test('ohne Terminal und ohne Skills bricht der Start mit dem Installationsbefehl
 
 test('nach der Installation prüft groundhog die Skills erneut und startet', async () => {
   const { klon, claude, pfad } = bereit({
-    claude: [CLAUDE_VERSION, OHNE_SKILLS, {}, {}, MIT_SKILLS],
+    claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS, {}, {}, MIT_SKILLS],
   })
 
   const { ergebnis } = await start({ klon, pfad }, [true, 'develop', 'pr'])
 
   expect(claude?.aufrufe().map((a) => a.args)).toEqual([
     ['--version'],
+    ['auth', 'status'],
     USAGE,
     ['plugin', 'marketplace', 'add', 'mattpocock/skills'],
     ['plugin', 'install', 'mattpocock-skills@mattpocock'],
@@ -596,7 +604,7 @@ test('nach der Installation prüft groundhog die Skills erneut und startet', asy
 
 test('fehlen die Skills nach der Installation weiter, bricht groundhog ab', async () => {
   const { klon, pfad } = bereit({
-    claude: [CLAUDE_VERSION, OHNE_SKILLS, {}, { exitCode: 1 }, OHNE_SKILLS],
+    claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS, {}, { exitCode: 1 }, OHNE_SKILLS],
   })
 
   const { ergebnis, gezeigt } = await start({ klon, pfad }, [true])
@@ -610,7 +618,7 @@ test('fehlen die Skills nach der Installation weiter, bricht groundhog ab', asyn
 })
 
 test('Strg+C bei der Frage nach der Installation bricht mit 130 ab', async () => {
-  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, OHNE_SKILLS] })
+  const { klon, pfad } = bereit({ claude: [CLAUDE_VERSION, ANGEMELDET, OHNE_SKILLS] })
 
   const { ergebnis } = await start({ klon, pfad }, [ABBRUCH])
 

@@ -113,6 +113,9 @@ export async function starte({
       throw new Abbruch('gh ist nicht angemeldet. Melde dich mit `gh auth login` an.')
     })
     versionen.claude = werkzeug(verzeichnis, 'claude', ['--version'])
+    werkzeug(verzeichnis, 'claude', ['auth', 'status'], () => {
+      throw new Abbruch('claude ist nicht angemeldet. Melde dich mit `claude auth login` an.')
+    })
 
     const gelesen = leseKonfiguration(verzeichnis)
     if (!gelesen.ok) throw new Abbruch(gelesen.fehler.join('\n'))
