@@ -447,8 +447,8 @@ async function schliesseAb(
     }
     case 'pr': {
       const url = await tracker.erstellePr({
-        kopf: integration,
-        basis: ziel,
+        integrationBranch: integration,
+        zielBranch: ziel,
         titel: `Spec #${spec}`,
         body: `Closes #${spec}`,
       })

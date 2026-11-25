@@ -33,9 +33,9 @@ export interface Tracker {
 
 export interface Pr {
   /** Branch mit der Arbeit. */
-  kopf: string
+  integrationBranch: string
   /** Branch, in den der PR mergt. */
-  basis: string
+  zielBranch: string
   titel: string
   body: string
 }

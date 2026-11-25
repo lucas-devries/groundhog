@@ -97,8 +97,8 @@ test('kommentieren und einen PR anlegen geben den Text über stdin an gh', async
 
   await tracker.kommentiere(25, kommentar)
   const url = await tracker.erstellePr({
-    kopf: 'spec/25',
-    basis: 'main',
+    integrationBranch: 'spec/25',
+    zielBranch: 'main',
     titel: 'Spec #25',
     body: 'Closes #25',
   })

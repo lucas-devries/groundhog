@@ -138,8 +138,17 @@ export class GitHubTracker implements Tracker {
     await this.#gh(['issue', 'comment', String(issue), '--body-file', '-'], text)
   }
 
-  async erstellePr({ kopf, basis, titel, body }: Pr): Promise<string> {
-    const args = ['pr', 'create', '--head', kopf, '--base', basis, '--title', titel]
+  async erstellePr({ integrationBranch, zielBranch, titel, body }: Pr): Promise<string> {
+    const args = [
+      'pr',
+      'create',
+      '--head',
+      integrationBranch,
+      '--base',
+      zielBranch,
+      '--title',
+      titel,
+    ]
     return (await this.#gh([...args, '--body-file', '-'], body)).trim()
   }
 

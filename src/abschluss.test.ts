@@ -127,7 +127,12 @@ test('PR: vom Integration-Branch auf den Ziel-Branch mit Closes, Link an der Spe
   const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'pr' })
 
   expect(tracker.prs).toEqual([
-    { kopf: 'spec/1', basis: 'main', titel: expect.any(String), body: 'Closes #1' },
+    {
+      integrationBranch: 'spec/1',
+      zielBranch: 'main',
+      titel: expect.any(String),
+      body: 'Closes #1',
+    },
   ])
   const url = 'https://github.example/pull/1'
   expect(ergebnis.abschluss).toEqual({ art: 'pr', url })
