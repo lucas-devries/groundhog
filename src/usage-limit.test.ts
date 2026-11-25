@@ -131,6 +131,7 @@ test('verlangt ein Abbruch ohne Reset-Zeit Guthaben, hält die Engine den Lauf a
   expect(uhr.jetzt()).toBe(0)
   expect(ereignisse.map((e) => e.art)).toEqual([
     'lauf-begonnen',
+    'task-graph',
     'ticket-genommen',
     'versuch-begonnen',
     'run-beendet',

@@ -64,6 +64,7 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
   const ereignisse = zeilen(join(pfad, 'lauf.jsonl'))
   expect(ereignisse.map((e) => e.art)).toEqual([
     'lauf-begonnen',
+    'task-graph',
     'ticket-genommen',
     'versuch-begonnen',
     'run-beendet',
@@ -74,6 +75,7 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     'pruefung',
     'push',
     'ticket-erledigt',
+    'task-graph',
     'lauf-beendet',
   ])
   expect(ereignisse[0]).toMatchObject({
@@ -81,7 +83,7 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     auswahl: { zielBranch: 'main', abschluss: 'nichts' },
     versionen: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
   })
-  expect(ereignisse[3]).toMatchObject({
+  expect(ereignisse[4]).toMatchObject({
     ticket: 2,
     run: 1,
     versuch: 1,
@@ -89,8 +91,22 @@ test('lauf.jsonl hält jedes Ereignis der Engine als eine Zeile fest, im Ordner 
     tokens: { input_tokens: 10, output_tokens: 5 },
     kostenUsd: 0.25,
   })
-  expect(ereignisse[9]).toMatchObject({ branch: 'spec/1' })
-  expect(ereignisse[11]).toMatchObject({ abschluss: { art: 'nichts' } })
+  expect(ereignisse[10]).toMatchObject({ branch: 'spec/1' })
+  expect(ereignisse[13]).toEqual({ art: 'lauf-beendet', abschluss: { art: 'nichts' }, zeit: START })
+})
+
+test('die Übersicht liegt als uebersicht.md im Ordner des Laufs, wie die Engine sie meldet', async () => {
+  const { klon } = wegwerfRepo()
+  let gemeldet = ''
+
+  const pfad = await lauf(klon, [commitet], {
+    weiter: (e) => {
+      if (e.art === 'lauf-beendet') gemeldet = e.uebersicht
+    },
+  })
+
+  expect(readFileSync(join(pfad, 'uebersicht.md'), 'utf8')).toBe(`${gemeldet}\n`)
+  expect(gemeldet).toMatch(/^# Übersicht Spec #1\n/)
 })
 
 test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks danach', async () => {
@@ -119,6 +135,7 @@ test('jeder Run hat seine rohe Ausgabe und die ungekürzte Ausgabe der Checks da
     'ticket-2-run-1.jsonl',
     'ticket-2-run-2-checks.log',
     'ticket-2-run-2.jsonl',
+    'uebersicht.md',
   ])
   expect(readFileSync(join(pfad, 'ticket-2-run-1.jsonl'), 'utf8')).toBe(
     '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n',

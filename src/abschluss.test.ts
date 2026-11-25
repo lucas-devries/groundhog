@@ -75,7 +75,7 @@ test('Mergen mit Konflikt: Merge abgebrochen, Integration- und Ziel-Branch unver
   expect(git(klon, 'status', '--porcelain')).toBe('')
   expect(git(klon, 'branch', '--show-current')).toBe('spec/1')
   expect(tracker.offen(1)).toBe(true)
-  expect(tracker.kommentare(1)).toEqual([])
+  expect(tracker.kommentare(1).slice(0, -1)).toEqual([])
 })
 
 test.each(['mergen', 'pr', 'nichts'] as const)(
@@ -94,7 +94,7 @@ test.each(['mergen', 'pr', 'nichts'] as const)(
     expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Ticket 2 umsetzen\ninit')
     expect(git(remote, 'rev-parse', 'main')).toBe(main)
     expect(tracker.prs).toEqual([])
-    expect(tracker.kommentare(1)).toEqual([])
+    expect(tracker.kommentare(1).slice(0, -1)).toEqual([])
     expect(tracker.offen(1)).toBe(true)
   },
 )
@@ -111,7 +111,7 @@ test('PR: vom Integration-Branch auf den Ziel-Branch mit Closes, Link an der Spe
   ])
   const url = 'https://github.example/pull/1'
   expect(ergebnis.abschluss).toEqual({ art: 'pr', url })
-  expect(tracker.kommentare(1)).toEqual([`PR: ${url}`])
+  expect(tracker.kommentare(1).slice(0, -1)).toEqual([`PR: ${url}`])
   expect(tracker.offen(1)).toBe(true)
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
 })
@@ -124,7 +124,7 @@ test('Nichts: der Name des Integration-Branch steht an der Spec, sonst geschieht
   const ergebnis = await lauf(klon, tracker, { zielBranch: 'main', abschluss: 'nichts' })
 
   expect(ergebnis.abschluss).toEqual({ art: 'nichts' })
-  expect(tracker.kommentare(1)).toEqual(['Integration-Branch: spec/1'])
+  expect(tracker.kommentare(1).slice(0, -1)).toEqual(['Integration-Branch: spec/1'])
   expect(tracker.prs).toEqual([])
   expect(tracker.offen(1)).toBe(true)
   expect(git(remote, 'rev-parse', 'main')).toBe(main)

@@ -1,7 +1,8 @@
-import type { Agent, RunErgebnis } from './agent.ts'
+import type { Agent, Block, RunErgebnis } from './agent.ts'
 import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import type { Ticket, Tracker } from './tracker.ts'
+import { fundort, kommentarGescheitert, uebersicht } from './uebersicht.ts'
 import type { Uhr } from './uhr.ts'
 
 export interface Auswahl {
@@ -21,6 +22,8 @@ export interface LaufEingabe {
   token?: string
   /** Versionen von groundhog, `claude` und Skill-Plugin, fürs Protokoll. */
   versionen?: Record<string, string>
+  /** Ordner des Protokolls, für Kommentare. */
+  protokoll?: string
   tracker: Tracker
   agent: Agent
   sandbox: Sandbox
@@ -37,8 +40,11 @@ type LaufEreignis =
       auswahl: Auswahl
       versionen: Record<string, string>
     }
+  /** Der Task-Graph, wie die Engine ihn vor jedem Ticket und am Ende gelesen hat. */
+  | { art: 'task-graph'; tickets: Ticket[] }
   | { art: 'push'; branch: string; commit: string }
-  | { art: 'lauf-beendet'; abschluss: AbschlussErgebnis }
+  /** `uebersicht` als Markdown; das Protokoll legt sie als `uebersicht.md` ab. */
+  | { art: 'lauf-beendet'; abschluss: AbschlussErgebnis; uebersicht: string }
   | { art: 'warnung'; text: string }
 
 type TicketEreignis = { ticket: number } & (
@@ -93,11 +99,35 @@ const RESET_PUFFER = MINUTE
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   const { spec, auswahl, verzeichnis, tracker, uhr, versuche = 3 } = eingabe
-  const melde = (e: LaufEreignis | TicketEreignis) => eingabe.melde?.({ ...e, zeit: uhr.jetzt() })
+  /** Was die Übersicht braucht: alle Ereignisse ohne die rohe Ausgabe der Runs. */
+  const verlauf: Ereignis[] = []
+  const melde = (e: LaufEreignis | TicketEreignis) => {
+    const ereignis = { ...e, zeit: uhr.jetzt() }
+    if (ereignis.art !== 'run-ausgabe') verlauf.push(ereignis)
+    eingabe.melde?.(ereignis)
+  }
   // Die eine Stelle, an der das Token aus Run- und Check-Ausgabe verschwindet.
   const filtere = (text: string) => (eingabe.token ? text.replaceAll(eingabe.token, '***') : text)
   const integration = `spec/${spec}`
   const ergebnis: Omit<LaufErgebnis, 'abschluss'> = { tickets: [] }
+  /** Ein gescheiterter Kommentar warnt nur; der Lauf geht weiter. */
+  const kommentiere = async (issue: number, text: string) => {
+    try {
+      await tracker.kommentiere(issue, text)
+    } catch (fehler) {
+      melde({
+        art: 'warnung',
+        text: `Kommentar an #${issue} gescheitert: ${(fehler as Error).message}`,
+      })
+    }
+  }
+  /** Reguläres Ende: Übersicht an die Spec und ins Ende-Ereignis. */
+  const beende = async (abschluss: AbschlussErgebnis) => {
+    const ende = { art: 'lauf-beendet', abschluss, zeit: uhr.jetzt() } as const
+    const text = uebersicht([...verlauf, { ...ende, uebersicht: '' }])
+    await kommentiere(spec, `${text}\n\n${fundort(eingabe.protokoll)}`)
+    eingabe.melde?.({ ...ende, uebersicht: text })
+  }
   melde({ art: 'lauf-begonnen', spec, auswahl, versionen: eingabe.versionen ?? {} })
 
   git(verzeichnis, 'fetch', '-q', 'origin')
@@ -107,6 +137,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
 
   while (true) {
     const graph = await tracker.taskGraph(spec)
+    melde({ art: 'task-graph', tickets: graph })
     const ticket = graph
       .filter((t) => bearbeitbar(t, tracker.nutzer))
       .sort((a, b) => a.nummer - b.nummer)[0]
@@ -114,8 +145,9 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       const abschluss = await schliesseAb(
         eingabe,
         graph.every((t) => !t.offen),
+        kommentiere,
       )
-      melde({ art: 'lauf-beendet', abschluss })
+      await beende(abschluss)
       return { ...ergebnis, abschluss }
     }
     const nr = ticket.nummer
@@ -168,6 +200,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
           return {
             pruefung,
             rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` ${grund}.\n\n${kuerzeVonVorn(ausgabe)}`,
+            ausgabe,
           }
         }
       }
@@ -177,6 +210,10 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     let rot: Rot | undefined
     let versuch = 0
     let runs = 0
+    const blocks: Block[] = []
+    /** Die rote Prüfung jedes Versuchs. */
+    const rote: string[] = []
+    let sessionId: string | undefined
     while (versuch < versuche) {
       versuch++
       melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
@@ -196,13 +233,15 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
             melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
         })
         melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
+        blocks.push(...(run.blocks ?? []))
+        sessionId = run.sessionId
         if (run.usageLimit === undefined) break
         // Usage-Limit: kein Versuch verbraucht; derselbe Versuch startet nach dem Reset neu.
         if (run.usageLimit === 'guthaben') {
           // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
           const abschluss: AbschlussErgebnis = { art: 'entfaellt', grund: 'Tickets offen' }
           melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
-          melde({ art: 'lauf-beendet', abschluss })
+          await beende(abschluss)
           return { ...ergebnis, abschluss, angehalten: 'guthaben' }
         }
         let reset: number | undefined = run.usageLimit
@@ -214,6 +253,7 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       }
       rot = await pruefe(run.erfolg, signal.aborted)
       if (!rot) break
+      rote.push(rot.pruefung)
       // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
       await tracker.oeffneWieder(nr)
       if (aktuellerBranch(verzeichnis) !== ticketBranch) {
@@ -228,6 +268,20 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       loescheTicketBranch()
       await tracker.markiereGescheitert(nr)
       await tracker.gibFrei(nr)
+      await kommentiere(
+        nr,
+        kommentarGescheitert({
+          rote,
+          versuche,
+          ausgabe:
+            rot.ausgabe === undefined
+              ? undefined
+              : kuerzeVonVorn(rot.ausgabe, 'gekürzt, vollständig im Protokoll'),
+          blocks: blocks.length,
+          sessionId,
+          protokoll: eingabe.protokoll,
+        }),
+      )
       melde({ art: 'ticket-gescheitert', ticket: nr, versuche: versuch, pruefung: rot.pruefung })
       ergebnis.tickets.push({
         nummer: nr,
@@ -260,6 +314,10 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     const commit = git(verzeichnis, 'rev-parse', 'HEAD')
     melde({ art: 'push', branch: integration, commit })
     loescheTicketBranch()
+    await kommentiere(
+      nr,
+      `Erledigt: ${commit} in ${integration}, Versuch ${versuch} von ${versuche}, Blocks: ${blocks.length}`,
+    )
     await tracker.schliesse(nr)
     melde({ art: 'ticket-erledigt', ticket: nr, commit, versuche: versuch })
     ergebnis.tickets.push({ nummer: nr, ergebnis: 'erledigt', versuche: versuch, commit })
@@ -269,13 +327,15 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
 interface Rot {
   pruefung: string
   rueckmeldung: string
+  /** Ausgabe des roten Checks, ungekürzt, gefiltert. */
+  ausgabe?: string
 }
 
 /** Kürzt eine Ausgabe von vorn auf die letzten 100 Zeilen und 50 000 Zeichen. */
-function kuerzeVonVorn(ausgabe: string): string {
+function kuerzeVonVorn(ausgabe: string, vermerk = 'gekürzt'): string {
   const zeilen = ausgabe.trimEnd().split('\n')
   let gekuerzt = zeilen.slice(-100).join('\n').slice(-50_000)
-  if (gekuerzt.length < ausgabe.trimEnd().length) gekuerzt = `[gekürzt]\n${gekuerzt}`
+  if (gekuerzt.length < ausgabe.trimEnd().length) gekuerzt = `[${vermerk}]\n${gekuerzt}`
   return gekuerzt
 }
 
@@ -283,6 +343,7 @@ function kuerzeVonVorn(ausgabe: string): string {
 async function schliesseAb(
   { spec, auswahl, verzeichnis, tracker }: LaufEingabe,
   alleGeschlossen: boolean,
+  kommentiere: (issue: number, text: string) => Promise<void>,
 ): Promise<AbschlussErgebnis> {
   if (!alleGeschlossen) return { art: 'entfaellt', grund: 'Tickets offen' }
   const integration = `spec/${spec}`
@@ -313,11 +374,11 @@ async function schliesseAb(
         titel: `Spec #${spec}`,
         body: `Closes #${spec}`,
       })
-      await tracker.kommentiere(spec, `PR: ${url}`)
+      await kommentiere(spec, `PR: ${url}`)
       return { art: 'pr', url }
     }
     case 'nichts':
-      await tracker.kommentiere(spec, `Integration-Branch: ${integration}`)
+      await kommentiere(spec, `Integration-Branch: ${integration}`)
       return { art: 'nichts' }
   }
 }
