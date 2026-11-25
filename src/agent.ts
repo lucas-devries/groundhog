@@ -8,10 +8,15 @@ export interface RunAuftrag {
   fixpunkt: string
   /** Ab dem zweiten Versuch: warum der letzte rot war, mit der Check-Ausgabe. */
   rueckmeldung?: string
+  /** Nimmt jede Zeile der rohen Ausgabe des Runs entgegen (bei Claude: `stream-json`). */
+  ausgabe: (zeile: string) => void
 }
 
 export interface RunErgebnis {
   erfolg: boolean
+  /** Tokens des Runs, wie `claude` sie meldet (`usage`). */
+  tokens?: Record<string, number>
+  kostenUsd?: number
 }
 
 /** Der Agent: startet einen Run an einem Ticket. Dahinter: Claude-Adapter (#33), Fake-Agent. */

@@ -134,7 +134,7 @@ test('ein Tracker-Fehler bricht den Lauf ab, ohne ein Ticket rot zu machen', asy
     agent: fakeAgent([setztUm, setztUm]),
     sandbox: durchreiche,
     uhr: steuerbareUhr(),
-    melde: (e) => arten.push(`${e.art} ${e.ticket}`),
+    melde: (e) => arten.push(`${e.art} ${'ticket' in e ? e.ticket : ''}`),
   })
 
   await expect(lauf).rejects.toThrow('gh: nicht erreichbar')

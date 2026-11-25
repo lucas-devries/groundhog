@@ -1,4 +1,4 @@
-import type { Agent } from './agent.ts'
+import type { Agent, RunErgebnis } from './agent.ts'
 import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import type { Ticket, Tracker } from './tracker.ts'
@@ -17,6 +17,10 @@ export interface LaufEingabe {
   checks: string[]
   /** Höchstzahl der Versuche pro Ticket. */
   versuche?: number
+  /** Wert des `gh`-Tokens; die Engine ersetzt ihn in Run- und Check-Ausgabe durch `***`. */
+  token?: string
+  /** Versionen von groundhog, `claude` und Skill-Plugin, fürs Protokoll. */
+  versionen?: Record<string, string>
   tracker: Tracker
   agent: Agent
   sandbox: Sandbox
@@ -24,12 +28,28 @@ export interface LaufEingabe {
   melde?: (ereignis: Ereignis) => void
 }
 
-export type Ereignis = TicketEreignis & { zeit: number }
+export type Ereignis = (LaufEreignis | TicketEreignis) & { zeit: number }
+
+type LaufEreignis =
+  | {
+      art: 'lauf-begonnen'
+      spec: number
+      auswahl: Auswahl
+      versionen: Record<string, string>
+    }
+  | { art: 'push'; branch: string; commit: string }
+  | { art: 'lauf-beendet' }
+  | { art: 'warnung'; text: string }
 
 type TicketEreignis = { ticket: number } & (
   | { art: 'ticket-genommen' }
   | { art: 'versuch-begonnen'; versuch: number; von: number }
-  | { art: 'pruefung'; name: string; ok: boolean }
+  /** Eine Zeile der rohen Ausgabe des Runs, gefiltert. */
+  | { art: 'run-ausgabe'; run: number; zeile: string }
+  /** `run` zählt Runs pro Ticket im Lauf, nicht Versuche. */
+  | ({ art: 'run-beendet'; run: number; versuch: number } & RunErgebnis)
+  /** `ausgabe` nur bei Checks: ungekürzt, gefiltert. */
+  | { art: 'pruefung'; name: string; ok: boolean; ausgabe?: string }
   | { art: 'ticket-erledigt'; commit: string; versuche: number }
   | { art: 'ticket-gescheitert'; versuche: number; pruefung: string }
 )
@@ -51,9 +71,12 @@ export interface LaufErgebnis {
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
   const { spec, auswahl, verzeichnis, tracker, uhr, versuche = 3 } = eingabe
-  const melde = (e: TicketEreignis) => eingabe.melde?.({ ...e, zeit: uhr.jetzt() })
+  const melde = (e: LaufEreignis | TicketEreignis) => eingabe.melde?.({ ...e, zeit: uhr.jetzt() })
+  // Die eine Stelle, an der das Token aus Run- und Check-Ausgabe verschwindet.
+  const filtere = (text: string) => (eingabe.token ? text.replaceAll(eingabe.token, '***') : text)
   const integration = `spec/${spec}`
   const ergebnis: LaufErgebnis = { tickets: [] }
+  melde({ art: 'lauf-begonnen', spec, auswahl, versionen: eingabe.versionen ?? {} })
 
   git(verzeichnis, 'fetch', '-q', 'origin')
   if (!branchExistiert(verzeichnis, integration)) {
@@ -64,7 +87,10 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     const ticket = (await tracker.taskGraph(spec))
       .filter((t) => bearbeitbar(t, tracker.nutzer))
       .sort((a, b) => a.nummer - b.nummer)[0]
-    if (!ticket) return ergebnis
+    if (!ticket) {
+      melde({ art: 'lauf-beendet' })
+      return ergebnis
+    }
     const nr = ticket.nummer
     const ticketBranch = `ticket/${nr}`
 
@@ -99,9 +125,11 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
         }
       }
       for (const check of eingabe.checks) {
-        const { exitCode, ausgabe } = await eingabe.sandbox.fuehreAus(check, { verzeichnis })
+        const ausfuehrung = await eingabe.sandbox.fuehreAus(check, { verzeichnis })
+        const { exitCode } = ausfuehrung
+        const ausgabe = filtere(ausfuehrung.ausgabe)
         const pruefung = `Check: ${check}`
-        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok: exitCode === 0 })
+        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok: exitCode === 0, ausgabe })
         if (exitCode !== 0) {
           return {
             pruefung,
@@ -114,15 +142,20 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
 
     let rot: Rot | undefined
     let versuch = 0
+    let runs = 0
     while (versuch < versuche) {
       versuch++
       melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
+      const r = ++runs
       const run = await eingabe.agent.run({
         ticket,
         verzeichnis,
         fixpunkt,
         rueckmeldung: rot?.rueckmeldung,
+        ausgabe: (zeile) =>
+          melde({ art: 'run-ausgabe', ticket: nr, run: r, zeile: filtere(zeile) }),
       })
+      melde({ art: 'run-beendet', ticket: nr, run: r, versuch, ...run })
       rot = await pruefe(run.erfolg)
       if (!rot) break
       // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
@@ -168,9 +201,10 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     git(verzeichnis, 'checkout', '-q', integration)
     git(verzeichnis, 'merge', '-q', '--ff-only', ticketBranch)
     git(verzeichnis, 'push', '-q', 'origin', integration)
+    const commit = git(verzeichnis, 'rev-parse', 'HEAD')
+    melde({ art: 'push', branch: integration, commit })
     loescheTicketBranch()
     await tracker.schliesse(nr)
-    const commit = git(verzeichnis, 'rev-parse', 'HEAD')
     melde({ art: 'ticket-erledigt', ticket: nr, commit, versuche: versuch })
     ergebnis.tickets.push({ nummer: nr, ergebnis: 'erledigt', versuche: versuch, commit })
   }
