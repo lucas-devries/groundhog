@@ -1,4 +1,4 @@
-import type { Agent } from './agent.ts'
+import type { Agent, RunErgebnis } from './agent.ts'
 import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import type { Ticket, Tracker } from './tracker.ts'
@@ -29,6 +29,10 @@ export type Ereignis = TicketEreignis & { zeit: number }
 type TicketEreignis = { ticket: number } & (
   | { art: 'ticket-genommen' }
   | { art: 'versuch-begonnen'; versuch: number; von: number }
+  /** Pause am Usage-Limit; `reset` ist die Reset-Zeit in ms, ohne Puffer. */
+  | { art: 'pause'; reset: number }
+  /** Am Usage-Limit ohne Reset-Zeit: Es geht erst mit Guthaben weiter. */
+  | { art: 'lauf-angehalten'; grund: 'guthaben' }
   | { art: 'pruefung'; name: string; ok: boolean }
   | { art: 'ticket-erledigt'; commit: string; versuche: number }
   | { art: 'ticket-gescheitert'; versuche: number; pruefung: string }
@@ -46,7 +50,16 @@ export interface TicketErgebnis {
 
 export interface LaufErgebnis {
   tickets: TicketErgebnis[]
+  /** Gesetzt, wenn der Lauf vorzeitig angehalten hat: Am Usage-Limit fehlt Guthaben. */
+  angehalten?: 'guthaben'
 }
+
+const MINUTE = 60_000
+const RUN_ZEITLIMIT = 60 * MINUTE
+/** Für einen Durchgang aller Checks zusammen. */
+const CHECKS_ZEITLIMIT = 15 * MINUTE
+/** Nach dem Reset des Usage-Limits: `resetsAt` ist auf Sekunden gerundet, die Server-Uhr kann abweichen. */
+const RESET_PUFFER = MINUTE
 
 /** Fährt einen ganzen Lauf über die Tickets einer Spec. */
 export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
@@ -80,9 +93,9 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     }
 
     /** Prüft einen Versuch; liefert bei Rot die rote Prüfung und die Rückmeldung für den nächsten Run. */
-    const pruefe = async (runErfolg: boolean): Promise<Rot | undefined> => {
+    const pruefe = async (runErfolg: boolean, runAbgelaufen: boolean): Promise<Rot | undefined> => {
       const pruefungen: [string, boolean][] = [
-        ['Run erfolgreich', runErfolg],
+        ['Run erfolgreich', runErfolg && !runAbgelaufen],
         [`HEAD auf ${ticketBranch}`, aktuellerBranch(verzeichnis) === ticketBranch],
         [
           'neuer Commit seit Fixpunkt',
@@ -95,17 +108,27 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
       if (rot) {
         return {
           pruefung: rot[0],
-          rueckmeldung: `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
+          rueckmeldung: runAbgelaufen
+            ? `Der letzte Versuch war rot: Der Run wurde nach ${RUN_ZEITLIMIT / MINUTE} Minuten beendet.`
+            : `Der letzte Versuch war rot: Prüfung „${rot[0]}“ nicht bestanden.`,
         }
       }
+      const signal = uhr.zeitlimit(CHECKS_ZEITLIMIT)
       for (const check of eingabe.checks) {
-        const { exitCode, ausgabe } = await eingabe.sandbox.fuehreAus(check, { verzeichnis })
+        const { exitCode, ausgabe } = await eingabe.sandbox.fuehreAus(check, {
+          verzeichnis,
+          signal,
+        })
         const pruefung = `Check: ${check}`
-        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok: exitCode === 0 })
-        if (exitCode !== 0) {
+        const ok = exitCode === 0 && !signal.aborted
+        melde({ art: 'pruefung', ticket: nr, name: pruefung, ok })
+        if (!ok) {
+          const grund = signal.aborted
+            ? `wurde nach ${CHECKS_ZEITLIMIT / MINUTE} Minuten beendet (Zeitlimit für alle Checks)`
+            : `endete mit Exit ${exitCode}`
           return {
             pruefung,
-            rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` endete mit Exit ${exitCode}.\n\n${kuerzeVonVorn(ausgabe)}`,
+            rueckmeldung: `Der letzte Versuch war rot: Check \`${check}\` ${grund}.\n\n${kuerzeVonVorn(ausgabe)}`,
           }
         }
       }
@@ -117,13 +140,32 @@ export async function fahreLauf(eingabe: LaufEingabe): Promise<LaufErgebnis> {
     while (versuch < versuche) {
       versuch++
       melde({ art: 'versuch-begonnen', ticket: nr, versuch, von: versuche })
-      const run = await eingabe.agent.run({
-        ticket,
-        verzeichnis,
-        fixpunkt,
-        rueckmeldung: rot?.rueckmeldung,
-      })
-      rot = await pruefe(run.erfolg)
+      let run: RunErgebnis
+      let signal: AbortSignal
+      while (true) {
+        signal = uhr.zeitlimit(RUN_ZEITLIMIT)
+        run = await eingabe.agent.run({
+          ticket,
+          verzeichnis,
+          fixpunkt,
+          rueckmeldung: rot?.rueckmeldung,
+          signal,
+        })
+        if (run.usageLimit === undefined) break
+        // Usage-Limit: kein Versuch verbraucht; derselbe Versuch startet nach dem Reset neu.
+        if (run.usageLimit === 'guthaben') {
+          // Setzt sich nicht von selbst zurück: Ticket, Branch und Arbeitsstand bleiben stehen.
+          melde({ art: 'lauf-angehalten', ticket: nr, grund: 'guthaben' })
+          return { ...ergebnis, angehalten: 'guthaben' }
+        }
+        let reset: number | undefined = run.usageLimit
+        while (reset !== undefined) {
+          melde({ art: 'pause', ticket: nr, reset })
+          await uhr.warte(Math.max(0, reset - uhr.jetzt()) + RESET_PUFFER)
+          reset = await eingabe.agent.erschoepftBis()
+        }
+      }
+      rot = await pruefe(run.erfolg, signal.aborted)
       if (!rot) break
       // Hat der Agent das Ticket selbst geschlossen, gilt das nicht.
       await tracker.oeffneWieder(nr)
