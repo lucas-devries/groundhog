@@ -45,7 +45,7 @@ if (antwort.haengt) {
 } else {
   fs.appendFileSync(log, JSON.stringify(aufruf) + '\\n')
   if (antwort.aufnahme) process.stdout.write(fs.readFileSync(antwort.aufnahme))
-  process.stdout.end(() => process.exit(antwort.exitCode ?? 0))
+  process.stdout.write('', () => process.exit(antwort.exitCode ?? 0))
 }
 `
 
