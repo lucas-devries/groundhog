@@ -6,6 +6,8 @@ export interface RunAuftrag {
   verzeichnis: string
   /** SHA am Abzweig des Ticket-Branch. */
   fixpunkt: string
+  /** Ab dem zweiten Versuch: warum der letzte rot war, mit der Check-Ausgabe. */
+  rueckmeldung?: string
 }
 
 export interface RunErgebnis {

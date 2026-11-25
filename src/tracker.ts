@@ -20,6 +20,12 @@ export interface Tracker {
   beanspruche(ticket: number): Promise<void>
   /** Schließt ein Ticket oder die Spec. */
   schliesse(issue: number): Promise<void>
+  /** Nimmt den eigenen Assignee wieder vom Ticket. */
+  gibFrei(ticket: number): Promise<void>
+  /** Öffnet das Ticket wieder; ist es offen, geschieht nichts. */
+  oeffneWieder(ticket: number): Promise<void>
+  /** Tauscht `ready-for-agent` gegen `ready-for-human`. */
+  markiereGescheitert(ticket: number): Promise<void>
   kommentiere(issue: number, text: string): Promise<void>
   /** Legt einen PR an und liefert seine URL. */
   erstellePr(pr: Pr): Promise<string>
@@ -98,6 +104,20 @@ export class InMemoryTracker implements Tracker {
   async erstellePr(pr: Pr) {
     this.prs.push(pr)
     return `https://github.example/pull/${this.prs.length}`
+  }
+
+  async gibFrei(nummer: number) {
+    const ticket = this.#finde(nummer)
+    ticket.assignees = ticket.assignees.filter((a) => a !== this.nutzer)
+  }
+
+  async oeffneWieder(nummer: number) {
+    this.#finde(nummer).offen = true
+  }
+
+  async markiereGescheitert(nummer: number) {
+    const ticket = this.#finde(nummer)
+    ticket.labels = [...ticket.labels.filter((l) => l !== 'ready-for-agent'), 'ready-for-human']
   }
 
   #finde(nummer: number): Ticket {

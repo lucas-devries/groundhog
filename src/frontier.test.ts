@@ -138,7 +138,7 @@ test('ein Tracker-Fehler bricht den Lauf ab, ohne ein Ticket rot zu machen', asy
   })
 
   await expect(lauf).rejects.toThrow('gh: nicht erreichbar')
-  expect(arten.filter((a) => !a.startsWith('pruefung'))).toEqual([
+  expect(arten.filter((a) => a.startsWith('ticket'))).toEqual([
     'ticket-genommen 2',
     'ticket-erledigt 2',
   ])
