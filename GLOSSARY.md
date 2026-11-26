@@ -42,6 +42,10 @@ _Avoid_: Job, Lauf (former German term)
 The marker with which a run claims a clone for itself, so that no second run starts there.
 _Avoid_: Lockfile, Sperre (former German term)
 
+**Worktree**:
+The working directory of a run, separate from the one a human works in. Every session and check on the spec's tickets happens there.
+_Avoid_: Workspace, run directory, sandbox directory
+
 **Session**:
 A single agent call on exactly one ticket within a run.
 _Avoid_: Run (the former German term, now taken by a whole run), Iteration
