@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-339933?logo=nodedotjs&logoColor=white" alt="Node ≥ 24">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux">
   <img src="https://img.shields.io/badge/agent-Claude%20Code-d97757" alt="Claude Code">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
 <p align="center">
@@ -172,3 +173,7 @@ npm test
 The engine is tested from the outside, with real git against throwaway repos. Fakes stand in for the tracker, the agent, the clock and the sandbox. No test starts a real Claude session or calls GitHub.
 
 To make a release, run `npm version <x>` and push the tag. `groundhog update` installs the newest tag. The domain vocabulary is in [GLOSSARY.md](GLOSSARY.md).
+
+## License
+
+[MIT](LICENSE)
