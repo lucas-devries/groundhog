@@ -278,7 +278,7 @@ test('with the sandbox switched off the menu warns, and the run gets no sandbox'
 
 const UPDATE_QUESTION = {
   kind: 'confirm',
-  message: 'groundhog v0.2.0 is out. Update now?',
+  message: 'groundhog 0.2.0 is out. Update now?',
   initialValue: false,
   active: 'Yes',
   inactive: 'No',
@@ -289,7 +289,7 @@ test('if there is a newer version, the menu asks about the update first; No star
   const install = vi.fn()
 
   const { result, shown } = await run({ clone, path }, [false, 'main', 'pr'], {
-    update: { newerVersion: () => 'v0.2.0', install },
+    update: { newerVersion: () => '0.2.0', install },
   })
 
   expect(shown[0]).toEqual(UPDATE_QUESTION)
@@ -303,15 +303,15 @@ test('Yes to the update installs the tag, ends the start and asks for a new star
   const install = vi.fn()
 
   const { result, shown } = await run({ clone, path }, [true], {
-    update: { newerVersion: () => 'v0.2.0', install },
+    update: { newerVersion: () => '0.2.0', install },
   })
 
   expect(shown).toEqual([UPDATE_QUESTION])
-  expect(install).toHaveBeenCalledWith('v0.2.0')
+  expect(install).toHaveBeenCalledWith('0.2.0')
   expect(result).toEqual({
     ok: false,
     exitCode: 0,
-    message: 'groundhog v0.2.0 is installed. Start again: groundhog 25',
+    message: 'groundhog 0.2.0 is installed. Start again: groundhog 25',
   })
   expect(existsSync(lock(clone))).toBe(false)
 })
@@ -321,9 +321,9 @@ test('if the update fails, the start aborts with the message', async () => {
 
   const { result } = await run({ clone, path }, [true], {
     update: {
-      newerVersion: () => 'v0.2.0',
+      newerVersion: () => '0.2.0',
       install: () => {
-        throw new Error('The update to v0.2.0 failed.')
+        throw new Error('The update to 0.2.0 failed.')
       },
     },
   })
@@ -331,7 +331,7 @@ test('if the update fails, the start aborts with the message', async () => {
   expect(result).toEqual({
     ok: false,
     exitCode: 1,
-    message: 'The update to v0.2.0 failed.',
+    message: 'The update to 0.2.0 failed.',
   })
   expect(existsSync(lock(clone))).toBe(false)
 })

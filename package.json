@@ -1,20 +1,45 @@
 {
-  "name": "groundhog",
+  "name": "groundhog-cli",
   "version": "0.1.0",
-  "private": true,
+  "description": "Hand over a spec, walk away: works through the tickets of a GitHub spec with Claude Code, verifies every result itself and lands one commit per ticket.",
+  "keywords": [
+    "claude-code",
+    "ai-agents",
+    "coding-agent",
+    "cli",
+    "automation",
+    "github-issues",
+    "sandbox"
+  ],
+  "homepage": "https://github.com/lucas-devries/groundhog#readme",
+  "bugs": "https://github.com/lucas-devries/groundhog/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucas-devries/groundhog.git"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
     "groundhog": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/testing"
+  ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "prepare": "tsc",
+    "prepack": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
+    "@clack/prompts": "^1.9.0",
+    "emphasize": "^7.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.9",
@@ -22,10 +47,5 @@
     "@vitest/coverage-v8": "^5.1.2",
     "typescript": "^7.0.2",
     "vitest": "^5.1.2"
-  },
-  "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.83",
-    "@clack/prompts": "^1.9.0",
-    "emphasize": "^7.0.0"
   }
 }

@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/lucas-devries/groundhog/actions/workflows/checks.yml"><img src="https://github.com/lucas-devries/groundhog/actions/workflows/checks.yml/badge.svg" alt="Checks"></a>
+  <a href="https://www.npmjs.com/package/groundhog-cli"><img src="https://img.shields.io/npm/v/groundhog-cli" alt="npm"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-339933?logo=nodedotjs&logoColor=white" alt="Node ≥ 24">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux">
   <img src="https://img.shields.io/badge/agent-Claude%20Code-d97757" alt="Claude Code">
@@ -59,7 +60,7 @@ The **finish** you chose at the start runs only once every ticket of the spec is
 ## Install
 
 ```sh
-npm install -g github:lucas-devries/groundhog
+npm install -g groundhog-cli
 ```
 
 You need:
@@ -172,7 +173,7 @@ npm test
 
 The engine is tested from the outside, with real git against throwaway repos. Fakes stand in for the tracker, the agent, the clock and the sandbox. No test starts a real Claude session or calls GitHub.
 
-To make a release, run `npm version <x>` and push the tag. `groundhog update` installs the newest tag. The domain vocabulary is in [GLOSSARY.md](GLOSSARY.md).
+To make a release, run `npm version <x>` and push the tag. GitHub Actions runs the checks and publishes the package to npm, and `groundhog update` installs the newest version from there. The domain vocabulary is in [GLOSSARY.md](GLOSSARY.md).
 
 ## License
 

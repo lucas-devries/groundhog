@@ -1,14 +1,14 @@
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 
-/** The installed version. A release is made with `npm version <x>`, which also creates the tag. */
+/** The installed version. A release is made with `npm version <x>` and pushing the tag; CI publishes it to npm. */
 export const VERSION: string = createRequire(import.meta.url)('../package.json').version
 
-const REPO = 'lucas-devries/groundhog'
-/** The first install is `npm install -g github:lucas-devries/groundhog`; `prepare` builds with `tsc`. */
-const pkg = (tag: string) => `github:${REPO}#${tag}`
+/** The package on npm; the first install is `npm install -g groundhog-cli`. */
+const PACKAGE = 'groundhog-cli'
+const pkg = (version: string) => `${PACKAGE}@${version}`
 
-// ponytail: only X.Y.Z, pre-release tags don't count.
+// ponytail: only X.Y.Z, pre-releases don't count.
 const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)$/
 
 function compare(a: string, b: string): number {
@@ -18,31 +18,28 @@ function compare(a: string, b: string): number {
   return 0
 }
 
-/** The newest SemVer tag of the groundhog repo, without a GitHub release; throws if GitHub doesn't answer. */
-function newestTag(): string | undefined {
-  const result = spawnSync('gh', ['api', '--paginate', `repos/${REPO}/tags`, '--jq', '.[].name'], {
+/** The newest version of the package on npm; throws if npm doesn't answer. */
+function newestVersion(): string | undefined {
+  const result = spawnSync('npm', ['view', PACKAGE, 'version'], {
     encoding: 'utf8',
     timeout: 15_000,
   })
   if (result.status !== 0) throw new Error(result.stderr?.trim() || String(result.error))
-  return result.stdout
-    .split('\n')
-    .filter((t) => SEMVER.test(t))
-    .sort(compare)
-    .at(-1)
+  const version = result.stdout.trim()
+  return SEMVER.test(version) ? version : undefined
 }
 
-/** The newest tag, if it is newer than `version`. A failed comparison stays silent. */
+/** The newest version, if it is newer than `version`. A failed comparison stays silent. */
 export function newerVersion(version = VERSION): string | undefined {
   try {
-    const tag = newestTag()
+    const tag = newestVersion()
     return tag && compare(tag, version) > 0 ? tag : undefined
   } catch {
     return undefined
   }
 }
 
-/** Installs `tag` globally the same way as the first install; throws if npm fails. */
+/** Installs `tag` globally from npm; throws if npm fails. */
 export function install(tag: string): void {
   const result = spawnSync('npm', ['install', '-g', pkg(tag)], { stdio: 'inherit' })
   if (result.status !== 0) {
@@ -50,11 +47,11 @@ export function install(tag: string): void {
   }
 }
 
-/** `groundhog update`: installs the newest tag or reports that the version is up to date. */
+/** `groundhog update`: installs the newest version or reports that the version is up to date. */
 export function update(version = VERSION): { exitCode: number; message: string } {
   let tag: string | undefined
   try {
-    tag = newestTag()
+    tag = newestVersion()
   } catch (error) {
     return {
       exitCode: 1,
