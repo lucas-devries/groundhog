@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
 import { installedSkills } from './claude.ts'
 import { type Config, readConfig } from './config.ts'
 import { type Choice, FINISH, integrationBranch } from './engine.ts'
 import { commonDir, git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { takeLock } from './lock.ts'
-import { type Log, openLog } from './log.ts'
-import type { Event } from './run-state.ts'
+import { runsFolder } from './log.ts'
 import { type SrtSandbox, sandboxMissing, srtSandbox } from './sandbox.ts'
 import { frontierState, isReady, type Ticket } from './tracker.ts'
 import { checkedOutElsewhere, worktreePaths } from './worktree.ts'
@@ -55,8 +55,6 @@ export interface StartOptions {
     /** Installs the tag; throws with a message if that fails. */
     install: (tag: string) => void
   }
-  /** Gets every event after the log has written it. */
-  next?: (event: Event) => void
 }
 
 /** Everything the runs of the batch need after the menu. */
@@ -78,8 +76,6 @@ export interface Ready {
   /** The `srt` sandbox; `undefined` only with `sandbox.off`. */
   sandbox: SrtSandbox | undefined
   versions: Record<string, string>
-  /** The log of the first run; every later run opens its own. */
-  log: Log
   /** Releases the lock; call on every end. */
   release: () => void
 }
@@ -100,7 +96,7 @@ class Abort extends Error {
 }
 
 /**
- * Start of a batch up to the end of the menu: start checks, lock, selection, log, menu. Changes
+ * Start of a batch up to the end of the menu: start checks, lock, selection, menu. Changes
  * neither repo nor tracker; on every abort the lock is free again.
  */
 export async function start({
@@ -110,7 +106,6 @@ export async function start({
   isTerminal,
   sandboxMissing: missing = sandboxMissing,
   update,
-  next,
 }: StartOptions): Promise<Start> {
   let release = () => {}
   try {
@@ -226,9 +221,9 @@ export async function start({
 
     if (!isTerminal) throw new Abort('groundhog needs a terminal on stdin for the menu.')
 
-    let log: Log
+    // Each run opens its log only later; whether it can is a start check, before any question.
     try {
-      log = openLog({ directory, spec: specs[0] as number, start: Date.now(), next })
+      accessSync(runsFolder(directory), constants.W_OK)
     } catch (error) {
       throw new Abort(`The log folder cannot be created: ${(error as Error).message}`)
     }
@@ -264,7 +259,6 @@ export async function start({
       repoUrl,
       sandbox,
       versions,
-      log,
       release,
     }
   } catch (error) {

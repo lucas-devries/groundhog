@@ -13,6 +13,13 @@ export interface Log {
   report: (event: Event) => void
 }
 
+/** The folder with the logs of a clone's runs, `.git/groundhog/runs/`; creates it or throws. */
+export function runsFolder(directory: string): string {
+  const runs = join(commonDir(directory), 'groundhog', 'runs')
+  mkdirSync(runs, { recursive: true })
+  return runs
+}
+
 /**
  * Creates the run's folder under `.git/groundhog/runs/` and deletes runs beyond the last 10.
  * Throws if the folder cannot be created.
@@ -27,9 +34,8 @@ export function openLog(options: {
   next?: (event: Event) => void
 }): Log {
   const { directory, spec, start, next } = options
-  const runs = join(commonDir(directory), 'groundhog', 'runs')
+  const runs = runsFolder(directory)
   const path = join(runs, `${timestamp(new Date(start))}-spec-${spec}`)
-  mkdirSync(runs, { recursive: true })
   mkdirSync(path)
   // The names start with the start time, so they sort chronologically.
   for (const old of readdirSync(runs).sort().slice(0, -KEEP)) {
