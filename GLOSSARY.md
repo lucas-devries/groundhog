@@ -38,6 +38,10 @@ _Avoid_: Project board, Backlog
 One execution of the engine over a spec, from the start until no ticket can be implemented any more.
 _Avoid_: Job, Lauf (former German term)
 
+**Batch**:
+The ordered specs a single start of groundhog works through, one run after another. It stops at the first run that does not end cleanly; the specs after it stay untouched.
+_Avoid_: Queue, Chain, Multi-run
+
 **Lock**:
 The marker with which a run claims a clone for itself, so that no second run starts there.
 _Avoid_: Lockfile, Sperre (former German term)
