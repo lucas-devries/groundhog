@@ -2,8 +2,9 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
+import type { Hunk } from './agent.ts'
 import { FINISH } from './choice.ts'
-import { type Hunk, keyArgument, readStreamLine } from './claude.ts'
+import { transcriptItems } from './claude.ts'
 import { type Event, fold, newRunState } from './run-state.ts'
 import { truncateFromStart } from './summary.ts'
 
@@ -44,7 +45,7 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
     fold(state, e)
     switch (e.type) {
       case 'session-output':
-        return transcript(e.line).flatMap((t) => {
+        return transcriptItems(e.line).flatMap((t) => {
           if (t.kind === 'text')
             return t.text
               .split('\n')
@@ -185,12 +186,6 @@ export function style(color: boolean) {
   }
 }
 
-type Transcript =
-  | { kind: 'text'; text: string }
-  | { kind: 'tool'; name: string; argument: string }
-  | { kind: 'result'; text: string; error: boolean }
-  | { kind: 'diff'; file: string; hunks: Hunk[] }
-
 const DIFF_MAX = 12
 
 /** A diff as in the Claude Code window: summary, line numbers, `+`/`-`. */
@@ -222,42 +217,4 @@ function diff(d: { file: string; hunks: Hunk[] }, width: number, s: Style): stri
     ...lines.slice(0, DIFF_MAX).map((l) => `  ${l}`),
     ...(lines.length > DIFF_MAX ? [s.dim(`       … ${lines.length - DIFF_MAX} more lines`)] : []),
   ]
-}
-
-/** Reads a line of `stream-json`; whatever isn't transcript (including non-JSON) gives nothing. */
-function transcript(line: string): Transcript[] {
-  const l = readStreamLine(line)
-  const contents =
-    typeof l?.message === 'object' && Array.isArray(l.message.content) ? l.message.content : []
-  const out: Transcript[] = []
-  for (const c of contents) {
-    if (l?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
-      out.push({ kind: 'text', text: c.text })
-    }
-    if (l?.type === 'assistant' && c.type === 'tool_use') {
-      const argument = keyArgument(c.input) ?? ''
-      out.push({ kind: 'tool', name: c.name ?? '?', argument })
-    }
-    if (l?.type === 'user' && c.type === 'tool_result') {
-      const r = l.tool_use_result
-      let hunks = Array.isArray(r?.structuredPatch) ? r.structuredPatch : []
-      if (hunks.length === 0 && r?.type === 'create' && typeof r.content === 'string') {
-        const lines = r.content
-          .replace(/\n$/, '')
-          .split('\n')
-          .map((x) => `+${x}`)
-        hunks = [{ oldStart: 1, newStart: 1, lines }]
-      }
-      if (hunks.length > 0) {
-        out.push({ kind: 'diff', file: r?.filePath ?? '', hunks })
-        continue
-      }
-      const text =
-        typeof c.content === 'string'
-          ? c.content
-          : (c.content ?? []).map((x) => x.text ?? '').join(' ')
-      out.push({ kind: 'result', text, error: c.is_error === true })
-    }
-  }
-  return out
 }

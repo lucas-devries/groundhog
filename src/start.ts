@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { readStreamLine, type StreamLine } from './claude.ts'
+import { installedSkills } from './claude.ts'
 import { type Config, readConfig } from './config.ts'
 import { type Choice, FINISH, integrationBranch } from './engine.ts'
 import { commonDir, git } from './git.ts'
@@ -308,25 +308,14 @@ const INSTALLATION = [
 ]
 
 /**
- * The missing skills according to the `init` event of `claude -p /usage` (no model, no cost);
- * records the version of the skill plugin in `versions`.
+ * The missing skills, as the Claude adapter reports the installed ones; records the version of the
+ * skill plugin in `versions`.
  */
 function skills(directory: string, versions: Record<string, string>): string[] {
-  const output = tool(directory, 'claude', [
-    '-p',
-    '/usage',
-    '--output-format',
-    'stream-json',
-    '--verbose',
-  ])
-  let init: StreamLine = {}
-  for (const line of output.split('\n')) {
-    const l = readStreamLine(line)
-    if (l?.type === 'system' && l.subtype === 'init') init = l
-  }
-  const version = init.plugins?.find((p) => p.name === 'mattpocock-skills')?.version
+  const installed = installedSkills((args) => tool(directory, 'claude', args))
+  const version = installed.plugins.find((p) => p.name === 'mattpocock-skills')?.version
   if (version) versions['mattpocock-skills'] = version
-  return SKILLS.filter((s) => !init.skills?.includes(s))
+  return SKILLS.filter((s) => !installed.skills.includes(s))
 }
 
 /** The human chooses the batch from the ready specs, which run oldest first. */
