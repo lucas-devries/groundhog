@@ -28,7 +28,7 @@ Commands:
 
 Exit codes of a run (of several runs: those of the last one):
   0    finished regularly, no ticket failed
-  1    start aborted, run aborted with an error or halted without credit
+  1    start aborted, run aborted with an error or halted (no credit, failing setup)
   2    finished regularly, at least one ticket failed for good (ready-for-human)
   130  aborted with Ctrl+C`
 
@@ -155,7 +155,9 @@ async function run(
       spec,
       choice: ready.choice,
       directory,
+      worktree: ready.worktree(spec),
       checks: config.checks,
+      setup: config.setup,
       maxAttempts: config.attempts,
       token,
       versions: { groundhog: VERSION, ...ready.versions },

@@ -3,7 +3,7 @@ import { type AgentScript, fakeAgent } from './agent.ts'
 import { manualClock } from './clock.ts'
 import { driveRun } from './engine.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
 /** A workable ticket, unless `part` says otherwise. */
@@ -22,6 +22,11 @@ const implementsTicket: AgentScript = ({ directory, ticket }) => {
   return { success: true }
 }
 
+function throwawayDirectories() {
+  const { clone } = throwawayRepo()
+  return { directory: clone, worktree: worktreeOf(clone) }
+}
+
 /** Drives a whole run over spec 1; returns the numbers of the taken tickets in order. */
 async function taken(
   tracker: InMemoryTracker,
@@ -31,7 +36,7 @@ async function taken(
   await driveRun({
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
-    directory: throwawayRepo().clone,
+    ...throwawayDirectories(),
     checks: [],
     tracker,
     agent: fakeAgent(script),
@@ -128,7 +133,7 @@ test('a tracker error aborts the run without making a ticket red', async () => {
   const run = driveRun({
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
-    directory: throwawayRepo().clone,
+    ...throwawayDirectories(),
     checks: [],
     tracker,
     agent: fakeAgent([implementsTicket, implementsTicket]),

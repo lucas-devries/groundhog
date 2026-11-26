@@ -20,6 +20,7 @@ const started: Event = {
   type: 'run-started',
   spec: 25,
   choice: { targetBranch: 'main', finish: 'merge' },
+  worktree: '/worktrees/spec-25',
   versions: {},
   time: 0,
 }

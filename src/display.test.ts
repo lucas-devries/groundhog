@@ -6,7 +6,7 @@ import { manualClock } from './clock.ts'
 import { display } from './display.ts'
 import { driveRun, type Event, type FinishResult } from './engine.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 /** What the display writes without a terminal for a sequence of events. */
@@ -119,6 +119,7 @@ test('state changes of the tickets, verifications, blocks and warnings appear as
         type: 'run-started',
         spec: 25,
         choice: { targetBranch: 'main', finish: 'pr' },
+        worktree: '/worktrees/spec-25',
         versions: { groundhog: '1.0.0', claude: '2.1.0' },
         time: at(1),
       },
@@ -175,10 +176,34 @@ test('state changes of the tickets, verifications, blocks and warnings appear as
   )
 })
 
+test('a failing setup shows its command and output like a red check, then the halt', () => {
+  expect(
+    text([
+      {
+        type: 'run-halted',
+        reason: 'setup',
+        command: 'npm ci',
+        output: 'npm error code E404\n  \x1b[31mat install\x1b[0m\r\n',
+        time: 0,
+      },
+      finished({ type: 'skipped', reason: 'setup failed' }),
+    ]).split('\n'),
+  ).toEqual(
+    expect.arrayContaining([
+      '  ✘ Setup: npm ci',
+      '  │ npm error code E404',
+      '  │   at install',
+      '■ Run halted: setup failed, no ticket was taken',
+      'Finish  skipped because setup failed. Next run: groundhog undefined',
+    ]),
+  )
+})
+
 const started = (finish: 'merge' | 'pr' | 'none'): Event => ({
   type: 'run-started',
   spec: 25,
   choice: { targetBranch: 'main', finish },
+  worktree: '/worktrees/spec-25',
   versions: {},
   time: 0,
 })
@@ -273,6 +298,7 @@ test('a real session, reported through the engine, appears continuously without 
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory: clone,
+    worktree: worktreeOf(clone),
     checks: ['true'],
     tracker: new InMemoryTracker('me', [
       { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },

@@ -50,6 +50,8 @@ export function board(options: BoardOptions = {}) {
   /** ` · Attempt n of m` from the second attempt on; the first is just running. */
   let attempt = ''
   let failed = ''
+  /** The lines of a failing `setup`; the closing lines repeat them. */
+  let setupLines: string[] = []
   const append = (added: string[]) => {
     transcript.push(...added)
     const dropped = transcript.splice(0, transcript.length - TRANSCRIPT_MAX).length
@@ -89,9 +91,15 @@ export function board(options: BoardOptions = {}) {
         append(added)
         break
       case 'session-finished':
-      case 'run-halted':
         append(added)
         break
+      case 'run-halted':
+        if (e.reason === 'setup') setupLines = added
+        append(added)
+        break
+      case 'run-finished':
+        // The board is gone after this event; the failing command must stay readable.
+        return [...setupLines, ...added]
       case 'ticket-done':
         done.add(e.ticket)
         state.set(e.ticket, s.green(e.attempts > 1 ? `✔ done in attempt ${e.attempts}` : '✔ done'))

@@ -28,6 +28,9 @@ export function throwawayRepo(): { remote: string; clone: string; newClone: () =
   return { remote, clone, newClone }
 }
 
+/** Where the tests put the run's worktree of a clone; the engine creates it. */
+export const worktreeOf = (clone: string) => `${clone}-worktree`
+
 /** Writes a file and commits it on the checked-out branch. */
 export function commitFile(directory: string, file: string, content: string, message: string) {
   writeFileSync(join(directory, file), content)

@@ -23,6 +23,7 @@ const started: Event = {
   type: 'run-started',
   spec: 25,
   choice: { targetBranch: 'main', finish: 'pr' },
+  worktree: '/worktrees/spec-25',
   versions: { groundhog: '1.2.3' },
   time: 0,
 }
@@ -630,4 +631,22 @@ test('in the terminal: without a terminal on stdin, stdin is not touched', () =>
   // Mouse reports would arrive on a stdin nobody reads.
   expect(written.join('')).not.toContain('?100')
   expect(input.listenerCount('data')).toBe(0)
+})
+
+test('in the terminal: a failing setup stays readable on the normal screen after the board closes', () => {
+  const { written, show } = terminal()
+  const board = show()
+
+  board.report({ type: 'run-halted', reason: 'setup', command: 'npm ci', output: 'E404', time: 0 })
+  board.report({
+    type: 'run-finished',
+    finish: { type: 'skipped', reason: 'setup failed' },
+    summary: '# Summary',
+    time: 0,
+  })
+
+  const normal = written.join('').split('\x1b[?1049l').at(-1)
+  expect(normal).toContain('Setup: npm ci')
+  expect(normal).toContain('│ E404')
+  expect(normal).toContain('# Summary')
 })

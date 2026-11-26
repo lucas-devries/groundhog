@@ -1,8 +1,12 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import { readStreamLine, type StreamLine } from './claude.ts'
 import { type Config, readConfig } from './config.ts'
-import { type Choice, type Event, FINISH, integrationBranch } from './engine.ts'
-import { git } from './git.ts'
+import { type Choice, type Event, FINISH, integrationBranch, ticketBranchOf } from './engine.ts'
+import { commonDir, git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { takeLock } from './lock.ts'
 import { type Log, openLog } from './log.ts'
@@ -63,6 +67,8 @@ export interface Ready {
   /** Repo root of the clone. */
   directory: string
   config: Config
+  /** The path of the worktree the run of a spec works in; the engine creates it. */
+  worktree: (spec: number) => string
   /** The batch in the order it runs. */
   specs: number[]
   /** Target branch and finish, the same for every run of the batch. */
@@ -144,25 +150,6 @@ export async function start({
     if (!lock.ok) throw new Abort(lock.message)
     release = lock.release
 
-    if (git(directory, 'status', '--porcelain') !== '') {
-      // Exception: the remnant of an aborted run on ticket/<n>.
-      const remnant = git(directory, 'branch', '--show-current').match(/^ticket\/(\d+)$/)?.[1]
-      const discard =
-        remnant !== undefined &&
-        isTerminal &&
-        (await dialog.confirm({
-          message: `Discard the remnant of ticket ${remnant}?`,
-          initialValue: false,
-          active: 'Yes',
-          inactive: 'No',
-        }))
-      if (typeof discard === 'symbol') throw new Abort(NOTHING_CHANGED, 130)
-      if (!discard) {
-        throw new Abort('The working tree is not clean. Commit or discard the changes.')
-      }
-      git(directory, 'reset', '-q', '--hard')
-      git(directory, 'clean', '-q', '-fd')
-    }
     git(directory, 'fetch', '-q', '--prune', 'origin')
     // Exactly the names spec and ticket; spec/<n> and ticket/<n> of earlier runs are no obstacle.
     const inTheWay = git(
@@ -195,7 +182,7 @@ export async function start({
           `The sandbox is on but does not start:\n${what.map((w) => `- ${w}`).join('\n')}`,
         )
       }
-      sandbox = srtSandbox(config.sandbox.hosts)
+      sandbox = srtSandbox(config.sandbox.hosts, commonDir(directory))
     }
 
     const missingSkills = skills(directory, versions)
@@ -229,8 +216,12 @@ export async function start({
     }
 
     const specs = named.length > 0 ? named : await selection(dialog, tracker)
+    const worktreePath = worktrees(directory)
     let repoUrl = ''
-    for (const spec of specs) repoUrl = await startCheck(tracker, spec)
+    for (const spec of specs) {
+      repoUrl = await startCheck(tracker, spec)
+      await branchCheck(directory, spec, worktreePath(spec), tracker)
+    }
 
     if (!isTerminal) throw new Abort('groundhog needs a terminal on stdin for the menu.')
 
@@ -264,6 +255,7 @@ export async function start({
       ok: true,
       directory,
       config,
+      worktree: worktreePath,
       specs,
       choice,
       tracker,
@@ -279,6 +271,28 @@ export async function start({
     const exitCode = error instanceof Abort ? error.exitCode : 1
     return { ok: false, exitCode, message: (error as Error).message }
   }
+}
+
+/**
+ * Where the worktrees of a clone lie, outside the repo (ADR 0001). The hash of the shared git
+ * directory keeps two clones apart and gives every worktree of one clone the same folder.
+ */
+function worktrees(directory: string): (spec: number) => string {
+  const main = listWorktrees(directory)[0]?.path ?? ''
+  const hash = createHash('sha256').update(commonDir(directory)).digest('hex').slice(0, 8)
+  const folder = `${basename(main)}-${hash}`
+  const root = join(homedir(), '.cache/groundhog/worktrees', folder)
+  return (spec) => join(root, `spec-${spec}`)
+}
+
+/** The worktrees git lists for the clone; the main one comes first, wherever git is asked from. */
+function listWorktrees(directory: string): { path: string; branch: string | undefined }[] {
+  return git(directory, 'worktree', 'list', '--porcelain')
+    .split('\n\n')
+    .map((block) => ({
+      path: block.match(/^worktree (.*)$/m)?.[1] ?? '',
+      branch: block.match(/^branch refs\/heads\/(.*)$/m)?.[1],
+    }))
 }
 
 /** Runs a tool and returns stdout; if it is missing in the `PATH`, the start aborts. */
@@ -377,6 +391,33 @@ async function startCheck(tracker: GitHubTracker, spec: number): Promise<string>
     )
   }
   return check.url
+}
+
+/**
+ * Git refuses to check out a branch in two worktrees, so no branch of the spec may be checked out
+ * outside the run's own worktree. The human's branch is never switched for them.
+ */
+async function branchCheck(directory: string, spec: number, own: string, tracker: GitHubTracker) {
+  const elsewhere = listWorktrees(directory).filter(
+    (w) => resolvedPath(w.path) !== resolvedPath(own),
+  )
+  let found = elsewhere.find((w) => w.branch === integrationBranch(spec))
+  // A ticket branch does not name its spec, so only the tracker knows whether it is one of ours.
+  if (!found && elsewhere.some((w) => w.branch?.startsWith('ticket/'))) {
+    const tickets = await tracker.taskGraph(spec)
+    found = elsewhere.find((w) => tickets.some((t) => w.branch === ticketBranchOf(t.number)))
+  }
+  if (found) throw new Abort(`${found.branch} is checked out in ${found.path}; switch away first.`)
+}
+
+/** `realpath` that also works for a missing folder, as a stale worktree registration has one. */
+function resolvedPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    const parent = dirname(path)
+    return parent === path ? path : join(resolvedPath(parent), basename(path))
+  }
 }
 
 /** The size of a run, as the selection and the "This run" note show it. */

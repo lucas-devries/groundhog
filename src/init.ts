@@ -13,7 +13,7 @@ export interface Dialog {
   multiline(o: {
     message: string
     initialValue: string
-    validate: Validate
+    validate?: Validate
   }): Promise<string | CtrlC>
   text(o: { message: string; initialValue: string; validate?: Validate }): Promise<string | CtrlC>
   multiselect(o: {
@@ -68,15 +68,20 @@ export async function init({
   if (!ghLoggedIn()) return abort('gh is not logged in. Log in with `gh auth login`.')
   if (!isTerminal) return abort('groundhog init needs a terminal on stdin.')
 
+  const suggestedSetup = existsSync(join(directory, 'package-lock.json')) ? ['npm ci'] : []
   let defaults: Config = {
     checks: nodeChecks(directory),
+    setup: suggestedSetup,
     attempts: DEFAULT_ATTEMPTS,
     targetBranches: [],
     sandbox: { hosts: [], off: false },
   }
   const read = readConfig(directory)
-  if (read.ok) defaults = read.config
-  else if (!read.missing) {
+  if (read.ok) {
+    // An empty `setup` in the file is the human's answer; only a missing one gets the suggestion.
+    const inFile = 'setup' in JSON.parse(readFileSync(join(directory, FILE), 'utf8'))
+    defaults = { ...read.config, setup: inFile ? read.config.setup : suggestedSetup }
+  } else if (!read.missing) {
     dialog.info(`${FILE} is invalid:\n${read.errors.map((e) => `- ${e}`).join('\n')}`)
     const recreate = await dialog.confirm({
       message: `Create ${FILE} anew?`,
@@ -94,6 +99,12 @@ export async function init({
     validate: (v) => (lines(v).length > 0 ? undefined : 'At least one check is required.'),
   })
   if (typeof checks === 'symbol') return CTRL_C
+
+  const setup = await dialog.multiline({
+    message: 'Setup: one command per line, run once in a new worktree (empty: none)',
+    initialValue: defaults.setup.join('\n'),
+  })
+  if (typeof setup === 'symbol') return CTRL_C
 
   const defaultBranch = git(directory, 'ls-remote', '--symref', 'origin', 'HEAD').match(
     /^ref: refs\/heads\/(\S+)\tHEAD/m,
@@ -130,6 +141,7 @@ export async function init({
 
   const config: Config = {
     checks: lines(checks),
+    setup: lines(setup),
     attempts: Number(attempts),
     targetBranches: order.filter((b) => targetBranches.includes(b)),
     sandbox: {

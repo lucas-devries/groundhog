@@ -75,7 +75,7 @@ The wrap-up at the end of a run: one result per ticket.
 _Avoid_: Report, Übersicht (former German term)
 
 **Sandbox**:
-The boundary groundhog puts around a session and its checks, which decides what they can reach on the machine and on the network. The engine lies outside.
+The boundary groundhog puts around a session, its checks and the `setup` commands, which decides what they can reach on the machine and on the network. The engine lies outside.
 _Avoid_: Container, Isolation
 
 **Block**:

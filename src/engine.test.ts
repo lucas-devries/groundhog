@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { type AgentScript, fakeAgent, type SessionRequest } from './agent.ts'
@@ -6,7 +6,7 @@ import { manualClock } from './clock.ts'
 import { driveRun, type Event } from './engine.ts'
 import { git } from './git.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 /** Drives a run over spec 1 with target branch main; returns the events. */
@@ -16,12 +16,14 @@ async function run(
   script: AgentScript[],
   checks = ['true'],
   attempts?: number,
+  worktree = worktreeOf(directory),
 ): Promise<Event[]> {
   const events: Event[] = []
   await driveRun({
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory,
+    worktree,
     checks,
     maxAttempts: attempts,
     tracker,
@@ -36,6 +38,11 @@ async function run(
 const oneTicket = () =>
   new InMemoryTracker('me', [
     { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },
+  ])
+
+const secondTicket = () =>
+  new InMemoryTracker('me', [
+    { number: 3, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },
   ])
 
 const commits: AgentScript = ({ directory }) => {
@@ -162,14 +169,14 @@ test.each<[string, AgentScript]>([
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
   expect(git(clone, 'branch', '--list', 'ticket/*')).toBe('')
   expect(git(remote, 'branch', '--list', 'ticket/*')).toBe('')
-  expect(git(clone, 'status', '--porcelain')).toBe('')
-  expect(git(clone, 'branch', '--show-current')).toBe('spec/1')
+  expect(git(worktreeOf(clone), 'status', '--porcelain')).toBe('')
+  expect(git(worktreeOf(clone), 'branch', '--show-current')).toBe('spec/1')
   const verifications = events.filter((e) => e.type === 'verification')
   expect(verifications.filter((v) => !v.ok).map((v) => v.name)).toEqual([red])
-  expect(existsSync(join(clone, 'check-ran'))).toBe(false)
+  expect(existsSync(join(worktreeOf(clone), 'check-ran'))).toBe(false)
 })
 
-test('checks run in order in the repo root, the first red one ends it', async () => {
+test('checks run in order in the worktree, the first red one ends it', async () => {
   const { remote, clone } = throwawayRepo()
   const tracker = oneTicket()
 
@@ -183,7 +190,7 @@ test('checks run in order in the repo root, the first red one ends it', async ()
 
   expect(tracker.ticket(2).open).toBe(true)
   expect(git(remote, 'branch', '--list', 'spec/1')).toBe('')
-  expect(existsSync(join(clone, 'too-far'))).toBe(false)
+  expect(existsSync(join(worktreeOf(clone), 'too-far'))).toBe(false)
   expect(
     events.filter((e) => e.type === 'verification' && e.name.startsWith('Check')),
   ).toMatchObject([
@@ -401,4 +408,136 @@ test('a ticket depending on a failed ticket stays put', async () => {
   await run(clone, tracker, [() => ({ success: false })], undefined, 1)
 
   expect(tracker.ticket(3)).toMatchObject({ open: true, assignees: [] })
+})
+
+/** The human's clone: on its own branch, with an uncommitted change and a new file. */
+function humanAtWork(clone: string) {
+  git(clone, 'checkout', '-q', '-b', 'own')
+  writeFileSync(join(clone, 'README.md'), 'half-finished')
+  writeFileSync(join(clone, 'new.txt'), 'x')
+  const state = () => ({
+    branch: git(clone, 'branch', '--show-current'),
+    status: git(clone, 'status', '--porcelain', '--untracked-files=all'),
+    readme: readFileSync(join(clone, 'README.md'), 'utf8'),
+  })
+  const before = state()
+  return { state, before }
+}
+
+test.each<[string, boolean]>([
+  ['green', true],
+  ['red', false],
+])('a %s run leaves the human’s clone on its branch with uncommitted work', async (_, success) => {
+  const { clone } = throwawayRepo()
+  const human = humanAtWork(clone)
+
+  await run(
+    clone,
+    oneTicket(),
+    [
+      (request) => {
+        commits(request)
+        return { success }
+      },
+    ],
+    undefined,
+    1,
+  )
+
+  expect(human.state()).toEqual(human.before)
+})
+
+test('a second run reuses the worktree and discards a leftover change without asking', async () => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  commitFile(clone, '.gitignore', 'ignored\n', 'ignore')
+  git(clone, 'push', '-q', 'origin', 'main')
+  // Ticket 4 stays open, so the worktree stays.
+  const unfinished = new InMemoryTracker('me', [
+    oneTicket().ticket(2),
+    { number: 4, open: true, labels: ['ready-for-human'], assignees: [], blockers: [] },
+  ])
+  await run(clone, unfinished, [commits])
+  // Left behind: an ignored file stays, everything else goes.
+  writeFileSync(join(worktree, 'ignored'), 'x')
+  writeFileSync(join(worktree, 'a.txt'), 'changed')
+  writeFileSync(join(worktree, 'untracked.txt'), 'x')
+  let inSession: unknown
+
+  await run(clone, secondTicket(), [
+    ({ directory }) => {
+      inSession = {
+        directory,
+        status: git(directory, 'status', '--porcelain'),
+        a: readFileSync(join(directory, 'a.txt'), 'utf8'),
+        ignored: existsSync(join(directory, 'ignored')),
+      }
+      commitFile(directory, 'b.txt', 'b', 'Implement ticket 3')
+      return { success: true }
+    },
+  ])
+
+  expect(inSession).toEqual({ directory: worktree, status: '', a: 'a', ignored: true })
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe(
+    'Implement ticket 3\nImplement ticket 2\nignore\ninit',
+  )
+  expect(git(clone, 'rev-parse', 'spec/1')).toBe(git(remote, 'rev-parse', 'spec/1'))
+})
+
+test('a worktree folder deleted by hand is created again, even if git has it locked', async () => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  git(clone, 'worktree', 'add', '-q', '--detach', worktree)
+  git(clone, 'worktree', 'lock', worktree)
+  rmSync(worktree, { recursive: true })
+
+  await run(clone, oneTicket(), [commits])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+})
+
+test.each([
+  ['a plain folder', () => {}],
+  ['a repo of its own', (folder: string) => git(folder, 'init', '-q')],
+])('%s at the path of the worktree is replaced by a fresh worktree', async (_name, prepare) => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  mkdirSync(worktree)
+  writeFileSync(join(worktree, 'unknown.txt'), 'x')
+  prepare(worktree)
+
+  await run(clone, secondTicket(), [
+    ({ directory }) => {
+      commitFile(directory, 'b.txt', 'b', 'Implement ticket 3')
+      return { success: true }
+    },
+  ])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 3\ninit')
+  // Every ticket is closed, so the run removed the worktree it added.
+  expect(existsSync(worktree)).toBe(false)
+})
+
+test('a folder git lists as the worktree but that lost its .git file is replaced', async () => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  git(clone, 'worktree', 'add', '-q', '--detach', worktree)
+  rmSync(join(worktree, '.git'))
+
+  await run(clone, oneTicket(), [commits])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+})
+
+test('an unknown folder inside another repo is replaced without touching that repo', async () => {
+  const { clone } = throwawayRepo()
+  const outer = throwawayRepo().clone
+  const worktree = join(outer, 'worktree')
+  mkdirSync(worktree)
+  writeFileSync(join(outer, 'README.md'), 'half-finished')
+
+  await run(clone, oneTicket(), [commits], undefined, undefined, worktree)
+
+  expect(readFileSync(join(outer, 'README.md'), 'utf8')).toBe('half-finished')
+  expect(git(outer, 'branch', '--show-current')).toBe('main')
 })

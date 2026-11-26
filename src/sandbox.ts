@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime'
+import { git } from './git.ts'
 
 export interface Execution {
   exitCode: number
@@ -30,12 +31,21 @@ export interface SrtSandbox extends Sandbox {
 const SRT_CLI = createRequire(import.meta.url).resolve('@anthropic-ai/sandbox-runtime/dist/cli.js')
 
 /** The sandbox with `srt`: fixed host list plus `hosts`, file system as in `srtConfig`. */
-export function srtSandbox(hosts: string[]): SrtSandbox {
+export function srtSandbox(hosts: string[], gitDir: string): SrtSandbox {
   // ponytail: the folder stays in temp after the run (one small file).
   const settingsDir = mkdtempSync(join(tmpdir(), 'groundhog-srt-'))
   const call = (directory: string, rest: string[]) => {
     const file = join(settingsDir, 'settings.json')
-    const paths = { directory, hosts, home: homedir(), temp: tmpdir(), settingsDir }
+    const worktreeGitDir = git(directory, 'rev-parse', '--absolute-git-dir')
+    const paths = {
+      directory,
+      gitDir,
+      worktreeGitDir,
+      hosts,
+      home: homedir(),
+      temp: tmpdir(),
+      settingsDir,
+    }
     writeFileSync(file, JSON.stringify(srtConfig(paths)))
     return [process.execPath, SRT_CLI, '--settings', file, ...rest]
   }
@@ -93,7 +103,12 @@ export const FIXED_HOSTS = [
 
 /** The paths the `srt` config is built from. */
 export interface SrtPaths {
+  /** The run's worktree. */
   directory: string
+  /** The git directory the clone shares with the worktree: objects, refs and index live there. */
+  gitDir: string
+  /** The worktree's own part of `gitDir`, `worktrees/<name>`. */
+  worktreeGitDir: string
   hosts: string[]
   home: string
   temp: string
@@ -102,13 +117,15 @@ export interface SrtPaths {
 }
 
 /** The `srt` config of a session or check. */
-export function srtConfig({ directory, hosts, home, temp, settingsDir }: SrtPaths) {
+export function srtConfig(paths: SrtPaths) {
+  const { directory, gitDir, worktreeGitDir, hosts, home, temp, settingsDir } = paths
   return {
     network: { allowedDomains: [...FIXED_HOSTS, ...hosts], deniedDomains: [] },
     filesystem: {
       denyRead: [join(home, '.ssh'), join(home, '.config/gh'), join(home, '.npmrc')],
       allowWrite: [
         directory,
+        gitDir,
         join(home, '.claude'),
         join(home, '.claude.json'),
         // ponytail: npm's default cache; a cache moved via `npm_config_cache` stays locked.
@@ -117,8 +134,14 @@ export function srtConfig({ directory, hosts, home, temp, settingsDir }: SrtPath
       ],
       denyWrite: [
         join(home, '.claude/settings.json'),
-        join(directory, '.git/hooks'),
-        join(directory, '.git/config'),
+        join(gitDir, 'hooks'),
+        join(gitDir, 'config'),
+        // The file that points the worktree at its repository.
+        join(directory, '.git'),
+        // They could point the engine's git, outside the sandbox, at other hooks and config.
+        join(worktreeGitDir, 'commondir'),
+        join(worktreeGitDir, 'gitdir'),
+        join(worktreeGitDir, 'config.worktree'),
         settingsDir,
       ],
     },

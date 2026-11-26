@@ -5,7 +5,7 @@ import { type AgentScript, fakeAgent } from './agent.ts'
 import { manualClock } from './clock.ts'
 import { driveRun, type Event, type RunResult } from './engine.ts'
 import { passthrough, type Sandbox } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 const MINUTE = 60_000
@@ -32,6 +32,7 @@ async function run(
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory: clone,
+    worktree: worktreeOf(clone),
     checks: options.checks ?? ['true'],
     maxAttempts: options.attempts ?? 1,
     tracker,

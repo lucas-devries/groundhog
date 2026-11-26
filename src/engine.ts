@@ -1,7 +1,9 @@
+import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Agent, Block, SessionResult } from './agent.ts'
 import type { Clock } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
-import { git } from './git.ts'
+import { commonDir, git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import { failedComment, resumeInfo, summary } from './summary.ts'
 import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
@@ -21,9 +23,13 @@ export const FINISH: Record<Choice['finish'], string> = {
 export interface RunInput {
   spec: number
   choice: Choice
-  /** Repo root of the clone. */
+  /** Repo root of the clone; only used to add and remove the worktree. */
   directory: string
+  /** The run's worktree: every session, check and git step happens there. */
+  worktree: string
   checks: string[]
+  /** Commands that prepare a newly created worktree; the project config's `setup`. */
+  setup?: string[]
   /** Maximum number of attempts per ticket. */
   maxAttempts?: number
   /** Value of the `gh` token; the engine replaces it with `***` in session and check output. */
@@ -48,6 +54,8 @@ type RunEvent =
       type: 'run-started'
       spec: number
       choice: Choice
+      /** For the resume line in summary and comment. */
+      worktree: string
       versions: Record<string, string>
     }
   /** The task-graph, as the engine read it before each ticket and at the end. */
@@ -56,6 +64,8 @@ type RunEvent =
   /** `summary` as Markdown; the log stores it as `summary.md`. */
   | { type: 'run-finished'; finish: FinishResult; summary: string }
   | { type: 'warning'; text: string }
+  /** `setup` failed, before any ticket. */
+  | ({ type: 'run-halted'; reason: 'setup' } & CommandOutput)
 
 type TicketEvent = { ticket: number } & (
   | { type: 'ticket-taken' }
@@ -75,6 +85,12 @@ type TicketEvent = { ticket: number } & (
   | { type: 'ticket-done'; commit: string; attempts: number }
   | { type: 'ticket-failed'; attempts: number; verification: string }
 )
+
+/** A command of the project config and its output, filtered. */
+export interface CommandOutput {
+  command: string
+  output: string
+}
 
 /** A ticket in the task-graph, with the state the engine gives it by the frontier rule. */
 export interface GraphTicket extends Ticket {
@@ -102,19 +118,21 @@ export type FinishResult =
   | { type: 'conflict' }
   | { type: 'pr'; url: string }
   | { type: 'none' }
-  | { type: 'skipped'; reason: 'tickets open' | 'aborted' }
+  | { type: 'skipped'; reason: 'tickets open' | 'setup failed' | 'aborted' }
 
 export interface RunResult {
   tickets: TicketResult[]
   finish: FinishResult
-  /** Set if the run halted early: at the usage limit credit is missing, or aborted. */
-  halted?: 'credit' | 'aborted'
+  /** Set if the run halted early: no credit at the usage limit, a failing `setup`, or aborted. */
+  halted?: 'credit' | 'setup' | 'aborted'
 }
 
 const MINUTE = 60_000
 const SESSION_TIME_LIMIT = 60 * MINUTE
 /** For one pass of all checks together. */
 const CHECKS_TIME_LIMIT = 15 * MINUTE
+/** For all `setup` commands together. */
+const SETUP_TIME_LIMIT = 15 * MINUTE
 /** After the usage limit reset: `resetsAt` is rounded to seconds, the server clock may differ. */
 const RESET_BUFFER = MINUTE
 
@@ -123,12 +141,16 @@ export function integrationBranch(spec: number): string {
   return `spec/${spec}`
 }
 
+export function ticketBranchOf(ticket: number): string {
+  return `ticket/${ticket}`
+}
+
 /** Thrown by the engine at the places where it accepts an abort. */
 class Aborted extends Error {}
 
 /** Drives a whole run over the tickets of a spec. */
 export async function driveRun(input: RunInput): Promise<RunResult> {
-  const { spec, choice, directory, tracker, clock, maxAttempts = DEFAULT_ATTEMPTS } = input
+  const { spec, choice, worktree, tracker, clock, maxAttempts = DEFAULT_ATTEMPTS } = input
   const abort = input.abort ?? new AbortController().signal
   const halt = () => {
     if (abort.aborted) throw new Aborted()
@@ -163,22 +185,81 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     await comment(spec, `${text}\n\n${resumeInfo(input.logDir)}`)
     input.report?.({ ...ending, summary: text })
   }
-  report({ type: 'run-started', spec, choice, versions: input.versions ?? {} })
+  report({ type: 'run-started', spec, choice, worktree, versions: input.versions ?? {} })
 
-  // Back here after an abort; a ticket/* remnant is deleted on the way.
-  let startingPoint = currentBranch(directory) || git(directory, 'rev-parse', 'HEAD')
-  if (startingPoint.startsWith('ticket/')) startingPoint = integration
-  git(directory, 'fetch', '-q', 'origin')
-  if (git(directory, 'branch', '-r', '--list', `origin/${integration}`)) {
+  /** A failed removal only warns: it must not cost the summary. */
+  const removeWorktree = () => {
+    try {
+      git(input.directory, 'worktree', 'remove', '--force', worktree)
+    } catch (error) {
+      report({
+        type: 'warning',
+        text: `Removing the worktree ${worktree} failed: ${(error as Error).message}`,
+      })
+    }
+  }
+
+  /**
+   * Lies in the worktree's git directory until `setup` has run through. A worktree that still has
+   * it (failed removal, abort, crash) is created anew, so that `setup` is never skipped.
+   */
+  const setupMarker = () =>
+    join(git(worktree, 'rev-parse', '--absolute-git-dir'), 'groundhog-setup-pending')
+  const setup = input.setup ?? []
+  const fresh = !isWorktreeOf(input.directory, worktree) || existsSync(setupMarker())
+  if (fresh) {
+    rmSync(worktree, { recursive: true, force: true })
+    // -f twice also replaces a stale registration of this path, even a locked one.
+    git(input.directory, 'worktree', 'add', '-q', '-f', '-f', '--detach', worktree)
+    if (setup.length > 0) writeFileSync(setupMarker(), '')
+  }
+  /** Throws away the work in the worktree; everything there is the agent's. */
+  const discard = () => {
+    git(worktree, 'reset', '-q', '--hard')
+    git(worktree, 'clean', '-q', '-fd')
+  }
+  discard()
+  git(worktree, 'fetch', '-q', 'origin')
+  if (git(worktree, 'branch', '-r', '--list', `origin/${integration}`)) {
     // The pushed state is what counts.
-    git(directory, 'checkout', '-q', '--no-track', '-B', integration, `origin/${integration}`)
-  } else if (!branchExists(directory, integration)) {
-    git(directory, 'branch', '-q', '--no-track', integration, `origin/${choice.targetBranch}`)
+    git(worktree, 'checkout', '-q', '--no-track', '-B', integration, `origin/${integration}`)
+  } else {
+    if (!branchExists(worktree, integration)) {
+      git(worktree, 'branch', '-q', '--no-track', integration, `origin/${choice.targetBranch}`)
+    }
+    git(worktree, 'checkout', '-q', integration)
+  }
+
+  /** Runs `setup` in a new worktree, in order; returns the first red command, if there is one. */
+  const runSetup = async (): Promise<CommandOutput | undefined> => {
+    const timeout = clock.timeout(SETUP_TIME_LIMIT)
+    const signal = AbortSignal.any([timeout, abort])
+    for (const command of setup) {
+      const execution = await input.sandbox.execute(command, { directory: worktree, signal })
+      halt()
+      if (execution.exitCode === 0 && !timeout.aborted) continue
+      const limit = timeout.aborted
+        ? `\n[ended after ${SETUP_TIME_LIMIT / MINUTE} minutes (time limit for all of setup)]`
+        : ''
+      return { command, output: `${filter(execution.output)}${limit}` }
+    }
+    rmSync(setupMarker(), { force: true })
+    // Only ignored files may stay; anything else would turn the first ticket red.
+    discard()
+    return undefined
   }
 
   /** The claimed ticket that is not finished yet. */
   let taken: number | undefined
   try {
+    const failed = fresh ? await runSetup() : undefined
+    if (failed) {
+      removeWorktree()
+      report({ type: 'run-halted', reason: 'setup', ...failed })
+      const finish: FinishResult = { type: 'skipped', reason: 'setup failed' }
+      await end(finish)
+      return { ...result, finish, halted: 'setup' }
+    }
     while (true) {
       const graph = (await tracker.taskGraph(spec)).map((t) => ({
         ...t,
@@ -196,17 +277,19 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           comment,
           report,
         )
+        // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
+        if (finish.type !== 'skipped') removeWorktree()
         await end(finish)
         return { ...result, finish }
       }
       const nr = ticket.number
-      const ticketBranch = `ticket/${nr}`
+      const ticketBranch = ticketBranchOf(nr)
 
       await tracker.claim(nr)
       taken = nr
       report({ type: 'ticket-taken', ticket: nr })
-      git(directory, 'checkout', '-q', '-B', ticketBranch, integration)
-      const forkPoint = git(directory, 'rev-parse', 'HEAD')
+      git(worktree, 'checkout', '-q', '-B', ticketBranch, integration)
+      const forkPoint = git(worktree, 'rev-parse', 'HEAD')
 
       /**
        * Verifies an attempt and records every verification in `results`; on red, returns the red
@@ -217,18 +300,18 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         sessionTimedOut: boolean,
         results: VerificationResult[],
       ): Promise<Red | undefined> => {
-        const record = (name: string, ok: boolean, check?: { command: string; output: string }) => {
+        const record = (name: string, ok: boolean, check?: CommandOutput) => {
           results.push({ name, ok })
           report({ type: 'verification', ticket: nr, name, ok, ...check })
         }
         const verifications: [string, boolean][] = [
           ['Session successful', sessionSuccess && !sessionTimedOut],
-          [`HEAD on ${ticketBranch}`, currentBranch(directory) === ticketBranch],
+          [`HEAD on ${ticketBranch}`, currentBranch(worktree) === ticketBranch],
           [
             'new commit since fork point',
-            git(directory, 'rev-list', '--count', `${forkPoint}..${ticketBranch}`) !== '0',
+            git(worktree, 'rev-list', '--count', `${forkPoint}..${ticketBranch}`) !== '0',
           ],
-          ['working tree clean', git(directory, 'status', '--porcelain') === ''],
+          ['working tree clean', git(worktree, 'status', '--porcelain') === ''],
         ]
         for (const [name, ok] of verifications) record(name, ok)
         const red = verifications.find(([, ok]) => !ok)
@@ -243,7 +326,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         const timeout = clock.timeout(CHECKS_TIME_LIMIT)
         const signal = AbortSignal.any([timeout, abort])
         for (const check of input.checks) {
-          const execution = await input.sandbox.execute(check, { directory, signal })
+          const execution = await input.sandbox.execute(check, { directory: worktree, signal })
           halt()
           const { exitCode } = execution
           const output = filter(execution.output)
@@ -283,7 +366,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           signal = clock.timeout(SESSION_TIME_LIMIT)
           session = await input.agent.runSession({
             ticket,
-            directory,
+            directory: worktree,
             forkPoint,
             feedback: red?.feedback,
             signal: AbortSignal.any([signal, abort]),
@@ -321,16 +404,15 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         reds.push(red.verification)
         // If the agent closed the ticket itself, that doesn't count.
         await tracker.reopen(nr)
-        if (currentBranch(directory) !== ticketBranch) {
-          git(directory, 'checkout', '-q', '-f', ticketBranch)
+        if (currentBranch(worktree) !== ticketBranch) {
+          git(worktree, 'checkout', '-q', '-f', ticketBranch)
         }
       }
 
       if (red) {
-        git(directory, 'reset', '-q', '--hard')
-        git(directory, 'clean', '-q', '-fd')
-        git(directory, 'checkout', '-q', '-f', integration)
-        deleteTicketBranch(directory, ticketBranch)
+        discard()
+        git(worktree, 'checkout', '-q', '-f', integration)
+        deleteTicketBranch(worktree, ticketBranch)
         await tracker.markFailed(nr)
         await tracker.release(nr)
         await comment(
@@ -343,6 +425,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
                 ? undefined
                 : truncateFromStart(red.output, 'truncated, full output in the log'),
             blocks: blocks.length,
+            worktree,
             sessionId,
             logDir: input.logDir,
           }),
@@ -363,10 +446,10 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         continue
       }
 
-      if (git(directory, 'rev-list', '--count', `${forkPoint}..HEAD`) !== '1') {
+      if (git(worktree, 'rev-list', '--count', `${forkPoint}..HEAD`) !== '1') {
         // Exceptional case: squash into one commit, the messages verbatim one after the other.
         const messages = git(
-          directory,
+          worktree,
           'log',
           '-z',
           '--reverse',
@@ -376,15 +459,15 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           .split('\0')
           .map((m) => m.trim())
           .filter(Boolean)
-        git(directory, 'reset', '-q', '--soft', forkPoint)
-        git(directory, 'commit', '-q', '-m', messages.join('\n\n'))
+        git(worktree, 'reset', '-q', '--soft', forkPoint)
+        git(worktree, 'commit', '-q', '-m', messages.join('\n\n'))
       }
-      git(directory, 'checkout', '-q', integration)
-      git(directory, 'merge', '-q', '--ff-only', ticketBranch)
-      git(directory, 'push', '-q', 'origin', integration)
-      const commit = git(directory, 'rev-parse', 'HEAD')
+      git(worktree, 'checkout', '-q', integration)
+      git(worktree, 'merge', '-q', '--ff-only', ticketBranch)
+      git(worktree, 'push', '-q', 'origin', integration)
+      const commit = git(worktree, 'rev-parse', 'HEAD')
       report({ type: 'push', branch: integration, commit })
-      deleteTicketBranch(directory, ticketBranch)
+      deleteTicketBranch(worktree, ticketBranch)
       await comment(
         nr,
         `Done: ${commit} in ${integration}, attempt ${attempt} of ${maxAttempts}, blocks: ${blocks.length}`,
@@ -399,13 +482,10 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   }
 
   // Orderly abort: discard the work, release the ticket, no comment on the spec.
+  discard()
+  git(worktree, 'checkout', '-q', '-f', integration)
   if (taken !== undefined) {
-    git(directory, 'reset', '-q', '--hard')
-    git(directory, 'clean', '-q', '-fd')
-  }
-  git(directory, 'checkout', '-q', '-f', startingPoint)
-  if (taken !== undefined) {
-    deleteTicketBranch(directory, `ticket/${taken}`)
+    deleteTicketBranch(worktree, ticketBranchOf(taken))
     await tracker.release(taken)
   }
   const finish: FinishResult = { type: 'skipped', reason: 'aborted' }
@@ -430,7 +510,7 @@ interface Red {
 }
 
 /** Truncates an output from the start to the last 100 lines and 50 000 characters. */
-function truncateFromStart(output: string, mark = 'truncated'): string {
+export function truncateFromStart(output: string, mark = 'truncated'): string {
   const lines = output.trimEnd().split('\n')
   let truncated = lines.slice(-100).join('\n').slice(-50_000)
   if (truncated.length < output.trimEnd().length) truncated = `[${mark}]\n${truncated}`
@@ -439,7 +519,7 @@ function truncateFromStart(output: string, mark = 'truncated'): string {
 
 /** The finish: only if all tickets of the spec are closed, otherwise the integration branch stays. */
 async function doFinish(
-  { spec, choice, directory, tracker }: RunInput,
+  { spec, choice, worktree, tracker }: RunInput,
   allClosed: boolean,
   comment: (issue: number, text: string) => Promise<void>,
   report: (e: RunEvent) => void,
@@ -449,21 +529,21 @@ async function doFinish(
   const target = choice.targetBranch
   switch (choice.finish) {
     case 'merge': {
-      git(directory, 'fetch', '-q', 'origin')
+      git(worktree, 'fetch', '-q', 'origin')
       // The merge happens on a detached HEAD, so the local target branch stays untouched.
-      git(directory, 'checkout', '-q', '--detach', `origin/${target}`)
+      git(worktree, 'checkout', '-q', '--detach', `origin/${target}`)
       try {
-        git(directory, 'merge', '-q', '--no-ff', '--no-edit', integration)
+        git(worktree, 'merge', '-q', '--no-ff', '--no-edit', integration)
       } catch {
         // The engine never resolves conflicts.
-        git(directory, 'merge', '--abort')
-        git(directory, 'checkout', '-q', integration)
+        git(worktree, 'merge', '--abort')
+        git(worktree, 'checkout', '-q', integration)
         return { type: 'conflict' }
       }
-      const commit = git(directory, 'rev-parse', 'HEAD')
-      git(directory, 'push', '-q', 'origin', `HEAD:refs/heads/${target}`)
+      const commit = git(worktree, 'rev-parse', 'HEAD')
+      git(worktree, 'push', '-q', 'origin', `HEAD:refs/heads/${target}`)
       report({ type: 'push', branch: target, commit })
-      git(directory, 'checkout', '-q', integration)
+      git(worktree, 'checkout', '-q', integration)
       await tracker.close(spec)
       return { type: 'merged', commit }
     }
@@ -480,6 +560,23 @@ async function doFinish(
     case 'none':
       await comment(spec, `Integration branch: ${integration}`)
       return { type: 'none' }
+  }
+}
+
+/**
+ * Whether the folder is a working worktree of the clone. Anything else must not be handed to
+ * `reset` or `clean`: git would then act on whatever repo lies above it.
+ */
+function isWorktreeOf(clone: string, folder: string): boolean {
+  try {
+    return (
+      git(folder, 'rev-parse', '--show-toplevel') === realpathSync(folder) &&
+      realpathSync(commonDir(folder)) === realpathSync(commonDir(clone))
+    )
+  } catch {
+    // Usually no folder or no repo there. Any other git error replaces the folder too, which
+    // costs nothing: all it holds is the agent's (ADR 0001).
+    return false
   }
 }
 

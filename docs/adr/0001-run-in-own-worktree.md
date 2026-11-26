@@ -1,6 +1,6 @@
 # Every run works in its own worktree outside the repo
 
-A run used to check out its branches in the human's own working directory, so nobody could make a quick change in the same clone while a run was going. Now every run works in its own git worktree, always and not configurable, under `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`. The worktree keeps a fixed path per spec and stays until the spec's finish has run.
+A run used to check out its branches in the human's own working directory, so nobody could make a quick change in the same clone while a run was going. Now every run works in its own git worktree, always and not configurable, under `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`. The worktree keeps a fixed path per spec and stays until the spec's finish has run, or until a failing `setup` removes it before any session ran.
 
 ## Considered Options
 
@@ -11,6 +11,7 @@ A run used to check out its branches in the human's own working directory, so no
 
 ## Consequences
 
-- A fresh worktree has no ignored files such as `node_modules`, so the project config gets a `setup` command that runs once after the worktree is created.
+- A fresh worktree has no ignored files such as `node_modules`, so the project config gets a list of `setup` commands that run once after the worktree is created.
 - Every leftover in the worktree is the agent's work, so a new run discards it without asking.
+- The same holds for the whole worktree path: a folder there that is not a worktree of the clone is deleted and replaced, and a stale registration of the path is overridden, even a locked one.
 - The lock stays one per clone: a run still claims the whole clone, only the human gets their working directory back.

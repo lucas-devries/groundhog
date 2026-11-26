@@ -1,6 +1,6 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { git } from './git.ts'
+import { join } from 'node:path'
+import { commonDir } from './git.ts'
 
 export type Lock = { ok: true; release: () => void } | { ok: false; message: string }
 
@@ -10,8 +10,7 @@ export type Lock = { ok: true; release: () => void } | { ok: false; message: str
  * does not belong to exactly one spec: before the selection, and for a batch of several specs.
  */
 export function takeLock(directory: string, spec: number | undefined, start: number): Lock {
-  const gitDir = resolve(directory, git(directory, 'rev-parse', '--git-common-dir'))
-  const file = join(gitDir, 'groundhog.lock')
+  const file = join(commonDir(directory), 'groundhog.lock')
   const content = JSON.stringify({ pid: process.pid, start, spec })
   // ponytail: two simultaneous takeovers of a dead lock can both win.
   for (;;) {

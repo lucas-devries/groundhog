@@ -63,7 +63,8 @@ export function summary(events: Event[]): string {
         break
       case 'ticket-failed': {
         const t = history(e.ticket)
-        const resume = t.sessionId ? ` · \`claude --resume ${t.sessionId}\`` : ''
+        const command = started && resumeCommand(started.worktree, t.sessionId)
+        const resume = command ? ` · \`${command}\`` : ''
         Object.assign(t, {
           result: 'failed',
           end: e.time,
@@ -177,6 +178,7 @@ export function failedComment(t: {
   /** Check output of the last attempt, already truncated; missing if no check was red. */
   output?: string
   blocks: number
+  worktree: string
   sessionId?: string
   logDir?: string
 }): string {
@@ -188,17 +190,26 @@ export function failedComment(t: {
     const fence = '`'.repeat(Math.max(3, ...(t.output.match(/`+/g) ?? []).map((f) => f.length + 1)))
     parts.push('Check output of the last attempt:', `${fence}\n${t.output}\n${fence}`)
   }
-  parts.push(`Blocks: ${t.blocks}`, resumeInfo(t.logDir, t.sessionId))
+  const command = resumeCommand(t.worktree, t.sessionId)
+  parts.push(`Blocks: ${t.blocks}`, resumeInfo(t.logDir, command))
   return parts.join('\n\n')
 }
 
 /** Where to pick it up: session, machine and log. Only in comments and the output. */
-export function resumeInfo(logDir?: string, sessionId?: string): string {
+export function resumeInfo(logDir?: string, command?: string): string {
   return [
-    sessionId && `- Session: \`claude --resume ${sessionId}\``,
+    command && `- Session: \`${command}\``,
     `- Machine: ${hostname()}`,
     logDir && `- Log: \`${logDir}\``,
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** Claude Code stores sessions per directory, so resuming starts with a `cd` into the worktree. */
+function resumeCommand(worktree: string, sessionId?: string): string | undefined {
+  if (!sessionId) return undefined
+  // Quoted only if the shell could split or expand the path.
+  const path = /^[\w./-]+$/.test(worktree) ? worktree : `'${worktree.replaceAll("'", `'\\''`)}'`
+  return `cd ${path} && claude --resume ${sessionId}`
 }
