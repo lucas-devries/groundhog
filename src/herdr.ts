@@ -58,8 +58,10 @@ export function herdr(
       progress = e.tickets.length ? Math.round((closed / e.tickets.length) * 100) : 100
     }
     if (e.type === 'ticket-taken') return osc('working', `Ticket #${e.ticket}`, progress)
-    if (e.type === 'run-finished') return osc(failed ? 'error' : 'done', `Spec #${spec}`, progress)
-    return undefined
+    if (e.type !== 'run-finished') return undefined
+    const aborted = e.finish.type === 'skipped' && e.finish.reason === 'aborted'
+    if (aborted) return osc('idle', `Spec #${spec} aborted`, progress)
+    return osc(failed ? 'error' : 'done', `Spec #${spec}`, progress)
   }
 }
 
@@ -69,6 +71,15 @@ export function herdr(
  */
 export function herdrStart(env: { HC_TERMINAL_ID?: string }, isTerminal: boolean): string {
   return env.HC_TERMINAL_ID && isTerminal ? osc('blocked', 'Start', 0) : ''
+}
+
+/**
+ * The report to hc when the process ends, given the last report it wrote: idle if that one still
+ * said working or blocked, since hc keeps a report until the terminal closes, not until groundhog
+ * exits. A done or error from the end of the run stays.
+ */
+export function herdrExit(last: string): string {
+  return /state=(working|blocked):/.test(last) ? osc('idle', 'Stopped', 0) : ''
 }
 
 /** `ESC ]7501;key=value:key=value BEL`, `msg` in Base64. */

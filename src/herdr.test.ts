@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { Event } from './engine.ts'
-import { herdr, herdrAgent, herdrStart } from './herdr.ts'
+import { herdr, herdrAgent, herdrExit, herdrStart } from './herdr.ts'
 import { frontierState, type Ticket } from './tracker.ts'
 
 const ticket = (number: number, open = true): Ticket => ({
@@ -102,6 +102,23 @@ test('at the end groundhog reports error if at least one ticket failed for good'
       finished,
     ]).at(-1),
   ).toBe(`\x1b]7501;state=error:app=groundhog:msg=${btoa('Spec #25')}:progress=50\x07`)
+})
+
+test('an aborted run reports idle, not done', () => {
+  const aborted: Event = { ...finished, finish: { type: 'skipped', reason: 'aborted' } } as Event
+  expect(sequences([started, graph(ticket(2)), taken(2), aborted]).at(-1)).toBe(
+    `\x1b]7501;state=idle:app=groundhog:msg=${btoa('Spec #25 aborted')}:progress=0\x07`,
+  )
+})
+
+test('at the exit of the process, a report still working or blocked turns idle; done and error stay', () => {
+  const idle = `\x1b]7501;state=idle:app=groundhog:msg=${btoa('Stopped')}:progress=0\x07`
+  const [working] = sequences([started])
+  expect(herdrExit(working ?? '')).toBe(idle)
+  expect(herdrExit(herdrStart({ HC_TERMINAL_ID: 't1' }, true))).toBe(idle)
+  expect(herdrExit(sequences([started, finished]).at(-1) ?? '')).toBe('')
+  // Outside hc nothing was reported, so nothing is closed.
+  expect(herdrExit('')).toBe('')
 })
 
 test('without HC_TERMINAL_ID or without a terminal on stdout groundhog reports nothing', () => {

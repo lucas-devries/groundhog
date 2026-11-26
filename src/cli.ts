@@ -8,7 +8,7 @@ import { claudeAgent } from './claude.ts'
 import { systemClock } from './clock.ts'
 import { display, type Position } from './display.ts'
 import { driveRun, type Event } from './engine.ts'
-import { herdr, herdrAgent, herdrStart } from './herdr.ts'
+import { herdr, herdrAgent, herdrExit, herdrStart } from './herdr.ts'
 import { init } from './init.ts'
 import { openLog } from './log.ts'
 import { passthrough } from './sandbox.ts'
@@ -67,15 +67,24 @@ async function runSpecs(specs: number[]): Promise<number> {
   let show: (e: Event) => void = () => {}
   const agent = herdrAgent(process.env)
   let herdrReport = newHerdrReport()
-  process.stdout.write(herdrStart(process.env, process.stdout.isTTY === true))
+  /** The last report to hc, so that the end of the process can close what is still open. */
+  let herdrLast = herdrStart(process.env, process.stdout.isTTY === true)
+  process.stdout.write(herdrLast)
   // Sync, so the release also works in the 'exit' handler; Herdr being gone must not stop the run.
   const callHerdr = (args: string[] | undefined) =>
     args &&
     spawnSync(process.env.HERDR_BIN_PATH || 'herdr', args, { stdio: 'ignore', timeout: 2000 })
-  process.once('exit', () => callHerdr(agent.release()))
+  process.once('exit', () => {
+    process.stdout.write(herdrExit(herdrLast))
+    callHerdr(agent.release())
+  })
   const next = (e: Event) => {
     show(e)
-    process.stdout.write(herdrReport(e) ?? '')
+    const report = herdrReport(e)
+    if (report) {
+      process.stdout.write(report)
+      herdrLast = report
+    }
     callHerdr(agent.report(e))
   }
   const ready = await start({
