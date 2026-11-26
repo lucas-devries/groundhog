@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process'
 import * as p from '@clack/prompts'
 import { abortGuard } from './abort.ts'
 import { showBoard } from './board.ts'
@@ -6,7 +7,7 @@ import { claudeAgent } from './claude.ts'
 import { systemClock } from './clock.ts'
 import { display } from './display.ts'
 import { driveRun, type Event } from './engine.ts'
-import { herdr } from './herdr.ts'
+import { herdr, herdrAgent } from './herdr.ts'
 import { init } from './init.ts'
 import { passthrough } from './sandbox.ts'
 import { start } from './start.ts'
@@ -59,6 +60,12 @@ async function run(spec: number): Promise<number> {
   p.intro(`groundhog ${VERSION}`)
   let show: (e: Event) => void = () => {}
   const herdrReport = herdr(process.env, process.stdout.isTTY === true)
+  const agent = herdrAgent(process.env)
+  // Sync, so the release also works in the 'exit' handler; Herdr being gone must not stop the run.
+  const callHerdr = (args: string[] | undefined) =>
+    args &&
+    spawnSync(process.env.HERDR_BIN_PATH || 'herdr', args, { stdio: 'ignore', timeout: 2000 })
+  process.once('exit', () => callHerdr(agent.release()))
   const ready = await start({
     directory: process.cwd(),
     spec,
@@ -68,6 +75,7 @@ async function run(spec: number): Promise<number> {
     next: (e) => {
       show(e)
       process.stdout.write(herdrReport(e) ?? '')
+      callHerdr(agent.report(e))
     },
   })
   if (!ready.ok) {

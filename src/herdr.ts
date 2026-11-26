@@ -1,8 +1,42 @@
 import type { Event } from './engine.ts'
 
 /**
- * Reports the run to Herdr via OSC 7501 as agent `groundhog`. Returns for each event the
- * sequence that belongs on stdout, or nothing. One function per run, fed with all events in
+ * Reports the run to Herdr (herdr.dev) as agent `groundhog`, so the pane shows up in its agent
+ * list. Returns for each event the arguments for the `herdr` CLI, or nothing; `release` gives
+ * the arguments that free the pane again at the end of the process, or nothing if groundhog
+ * never reported. One object per run, fed with all events in order.
+ */
+export function herdrAgent(env: { HERDR_ENV?: string; HERDR_PANE_ID?: string }): {
+  report: (e: Event) => string[] | undefined
+  release: () => string[] | undefined
+} {
+  const pane = env.HERDR_ENV === '1' ? env.HERDR_PANE_ID : undefined
+  // Herdr orders reports per source by seq; time-based so a later run in the same pane wins.
+  let seq = Date.now() * 1000
+  let reported = false
+  const id = ['--source', 'custom:groundhog', '--agent', 'groundhog']
+  const call = (pane: string, command: string, ...rest: string[]) => {
+    seq += 1
+    return ['pane', command, pane, ...id, ...rest, '--seq', String(seq)]
+  }
+  const working = (pane: string, message: string) => {
+    reported = true
+    return call(pane, 'report-agent', '--state', 'working', '--message', message)
+  }
+  return {
+    report: (e) => {
+      if (!pane) return undefined
+      if (e.type === 'run-started') return working(pane, `Spec #${e.spec}`)
+      if (e.type === 'ticket-taken') return working(pane, `Ticket #${e.ticket}`)
+      return undefined
+    },
+    release: () => (pane && reported ? call(pane, 'release-agent') : undefined),
+  }
+}
+
+/**
+ * Reports the run to hc (herdr-core) via OSC 7501 as agent `groundhog`. Returns for each event
+ * the sequence that belongs on stdout, or nothing. One function per run, fed with all events in
  * order.
  */
 export function herdr(

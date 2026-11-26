@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { Event } from './engine.ts'
-import { herdr } from './herdr.ts'
+import { herdr, herdrAgent } from './herdr.ts'
 import { frontierState, type Ticket } from './tracker.ts'
 
 const ticket = (number: number, open = true): Ticket => ({
@@ -98,4 +98,38 @@ test('without HC_TERMINAL_ID or without a terminal on stdout groundhog reports n
   for (const report of [herdr({}, true), herdr({ HC_TERMINAL_ID: 't1' }, false)]) {
     expect(run.map(report).filter(Boolean)).toEqual([])
   }
+})
+
+/** The herdr CLI calls groundhog makes for the events in a Herdr pane, without --seq. */
+function calls(events: Event[]): string[][] {
+  const agent = herdrAgent({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' })
+  const all = [...events.map(agent.report), agent.release()]
+  return all.flatMap((c) => (c ? [c.slice(0, -2)] : []))
+}
+const id = ['--source', 'custom:groundhog', '--agent', 'groundhog']
+
+test('in Herdr groundhog is agent groundhog: working from the start, the message names the ticket, released at the end', () => {
+  expect(calls([started, graph(ticket(2)), taken(2), done(2), finished])).toEqual([
+    ['pane', 'report-agent', 'w1:p1', ...id, '--state', 'working', '--message', 'Spec #25'],
+    ['pane', 'report-agent', 'w1:p1', ...id, '--state', 'working', '--message', 'Ticket #2'],
+    ['pane', 'release-agent', 'w1:p1', ...id],
+  ])
+})
+
+test('each Herdr call carries a higher --seq than the one before', () => {
+  const agent = herdrAgent({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' })
+  const seqs = [agent.report(started), agent.report(taken(2)), agent.release()].map((c) =>
+    Number(c?.at(-1)),
+  )
+  expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
+  expect(new Set(seqs).size).toBe(3)
+})
+
+test('outside Herdr, or before anything was reported, groundhog calls no herdr', () => {
+  for (const env of [{}, { HERDR_PANE_ID: 'w1:p1' }]) {
+    const agent = herdrAgent(env)
+    expect([started, taken(2), finished].map(agent.report).filter(Boolean)).toEqual([])
+    expect(agent.release()).toBeUndefined()
+  }
+  expect(herdrAgent({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }).release()).toBeUndefined()
 })
