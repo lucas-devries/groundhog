@@ -221,6 +221,175 @@ test('the board holds the last 10,000 transcript lines and drops older ones', ()
   expect(s.filter((l) => l.startsWith('  ')).length).toBe(10_000)
 })
 
+/** Bytes as terminals send them. */
+const KEY = {
+  up: '\x1b[A',
+  down: '\x1b[B',
+  pageUp: '\x1b[5~',
+  pageDown: '\x1b[6~',
+  home: '\x1b[H',
+  end: '\x1b[F',
+}
+
+/**
+ * A board with the transcript lines 1 to `count`, in a window of 60 × 10: four lines of top,
+ * four of transcript, rule and footer.
+ */
+function scrollable(count = 20) {
+  const b = board()
+  b.report(started)
+  b.report(graph(ticket(27)))
+  let n = 0
+  const say = (more: number) => {
+    for (let i = 0; i < more; i++) b.report(assistant(27, `line ${++n}`))
+  }
+  say(count)
+  const view = (height = 10) => b.screen(60, height)
+  /** Numbers of the transcript lines on the screen. */
+  const shown = (height = 10) =>
+    view(height)
+      .flatMap((l) => l.match(/^ {2}│ line (\d+)$/)?.[1] ?? [])
+      .map(Number)
+  view()
+  return { b, say, view, shown }
+}
+
+test('↑ and ↓ scroll the transcript by one line; the top of the board stays', () => {
+  const { b, view, shown } = scrollable()
+  const top = view().slice(0, 4)
+  b.input(KEY.up)
+  b.input(Buffer.from(KEY.up))
+  expect(shown()).toEqual([15, 16, 17, 18])
+  expect(view().slice(0, 4)).toEqual(top)
+  b.input(KEY.down)
+  expect(shown()).toEqual([16, 17, 18, 19])
+})
+
+test('PgUp and PgDn page by the transcript height minus one, Home and End jump to the ends', () => {
+  const { b, shown } = scrollable()
+  b.input(KEY.pageUp)
+  expect(shown()).toEqual([14, 15, 16, 17])
+  b.input(KEY.pageUp)
+  expect(shown()).toEqual([11, 12, 13, 14])
+  b.input(KEY.pageDown)
+  expect(shown()).toEqual([14, 15, 16, 17])
+  b.input(KEY.home)
+  expect(shown()).toEqual([1, 2, 3, 4])
+  b.input(KEY.up)
+  b.input(KEY.pageUp)
+  expect(shown()).toEqual([1, 2, 3, 4])
+  b.input(KEY.end)
+  expect(shown()).toEqual([17, 18, 19, 20])
+})
+
+test('keys in the variants of other terminals, also several in one chunk', () => {
+  const { b, shown } = scrollable()
+  b.input('\x1bOA\x1bOA')
+  expect(shown()).toEqual([15, 16, 17, 18])
+  b.input('\x1bOB')
+  expect(shown()).toEqual([16, 17, 18, 19])
+  for (const [home, end] of [
+    ['\x1bOH', '\x1bOF'],
+    ['\x1b[1~', '\x1b[4~'],
+    ['\x1b[7~', '\x1b[8~'],
+  ] as const) {
+    b.input(home)
+    expect(shown()).toEqual([1, 2, 3, 4])
+    b.input(end)
+    expect(shown()).toEqual([17, 18, 19, 20])
+  }
+})
+
+test('unknown bytes are ignored', () => {
+  const { b, view } = scrollable()
+  b.input(KEY.up)
+  const before = view()
+  // Letters, Ctrl+C, a bare Escape, ← →, Delete, Shift+↑, F5 and a mouse click.
+  for (const bytes of ['jkq G', '\x03', '\x1b', '\x1b[D\x1b[C', '\x1b[3~', '\x1b[1;2A', '\x1b[15~'])
+    b.input(bytes)
+  b.input('\x1b[<0;5;5M')
+  b.input(Buffer.from([0xff, 0x00]))
+  expect(view()).toEqual(before)
+})
+
+test('while scrolled up the view stays put and the footer counts the new lines', () => {
+  const { b, say, view, shown } = scrollable()
+  b.report({ type: 'attempt-started', ticket: 27, attempt: 1, of: 3, time: 0 })
+  say(1)
+  view()
+  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3')
+  b.input(KEY.pageUp)
+  const kept = shown()
+  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 0 new lines · End to follow')
+  say(1)
+  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 1 new line · End to follow')
+  say(6)
+  expect(shown()).toEqual(kept)
+  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 7 new lines · End to follow')
+})
+
+test('reaching the end by scrolling or End follows the live end again', () => {
+  const { b, say, view, shown } = scrollable()
+  for (const back of [KEY.end, KEY.down + KEY.down, KEY.pageDown]) {
+    b.input(KEY.up + KEY.up)
+    say(0)
+    b.input(back)
+    expect(view().at(-1)).toBe('')
+  }
+  // Counting starts again with the next scroll.
+  b.input(KEY.up)
+  say(2)
+  b.input(KEY.end)
+  say(1)
+  expect(shown()).toEqual([20, 21, 22, 23])
+  b.input(KEY.up)
+  expect(view().at(-1)).toBe('↓ 0 new lines · End to follow')
+})
+
+test('a transcript that fits the window has nothing to scroll', () => {
+  const { b, say, view, shown } = scrollable(3)
+  b.input(KEY.up + KEY.pageUp + KEY.home)
+  expect(view().at(-1)).toBe('')
+  say(2)
+  expect(shown()).toEqual([2, 3, 4, 5])
+})
+
+test('scrolling up in a window grown to fit the whole transcript follows the live end', () => {
+  for (const key of [KEY.up, KEY.pageUp, KEY.home]) {
+    const { b, view } = scrollable()
+    b.input(KEY.up)
+    view(30)
+    b.input(key)
+    expect(view(30).at(-1)).toBe('')
+  }
+})
+
+test('resizing while scrolled up keeps the topmost transcript line', () => {
+  const { b, view, shown } = scrollable()
+  b.input(KEY.pageUp)
+  expect(shown(8)).toEqual([14, 15])
+  expect(shown(13)).toEqual([14, 15, 16, 17, 18, 19, 20])
+  expect(shown(18)).toEqual([14, 15, 16, 17, 18, 19, 20])
+  expect(view(18).at(-1)).toContain('End to follow')
+  expect(shown()).toEqual([14, 15, 16, 17])
+  // Pages follow the height of the window as it is now.
+  view(12)
+  b.input(KEY.pageUp)
+  expect(shown(12)).toEqual([9, 10, 11, 12, 13, 14])
+})
+
+test('dropping old lines at the limit while scrolled up keeps the visible text where possible', () => {
+  const { b, say, shown } = scrollable(10_000)
+  b.input(KEY.home)
+  b.input(KEY.pageDown + KEY.pageDown)
+  expect(shown()).toEqual([7, 8, 9, 10])
+  say(4)
+  expect(shown()).toEqual([7, 8, 9, 10])
+  // The visible lines themselves are dropped: the oldest ones left take their place.
+  say(5)
+  expect(shown()).toEqual([10, 11, 12, 13])
+})
+
 test('with colours, truncation is ANSI-safe', () => {
   const b = board({ color: true })
   b.report(started)
@@ -228,14 +397,35 @@ test('with colours, truncation is ANSI-safe', () => {
   expect(header).toBe('\x1b[2mgroundhog 1…\x1b[0m')
 })
 
-test('in the terminal: alternate screen, redrawn on event and resize, closing lines on the normal screen', () => {
+/** A fake terminal for `showBoard`: what it wrote, and what it did with stdin. */
+function terminal(isTTY = true) {
   const written: string[] = []
+  const stdin: string[] = []
   const out = Object.assign(new EventEmitter(), {
     columns: 30,
     rows: 6,
     write: (t: string) => written.push(t),
-  }) as unknown as NodeJS.WriteStream
-  const { report } = showBoard(out, '/repo/.git/groundhog/runs/x')
+  })
+  const input = Object.assign(new EventEmitter(), {
+    isTTY,
+    setRawMode: (on: boolean) => stdin.push(`raw ${on}`),
+    resume: () => stdin.push('resume'),
+    pause: () => stdin.push('pause'),
+  })
+  let interrupts = 0
+  const show = (logDir?: string) =>
+    showBoard(
+      out as unknown as NodeJS.WriteStream,
+      input as unknown as NodeJS.ReadStream,
+      () => interrupts++,
+      logDir,
+    )
+  return { out, input, written, stdin, show, interrupts: () => interrupts }
+}
+
+test('in the terminal: alternate screen, redrawn on event and resize, closing lines on the normal screen', () => {
+  const { out, written, show } = terminal()
+  const { report } = show('/repo/.git/groundhog/runs/x')
   expect(written.shift()).toBe('\x1b[?1049h\x1b[?25l\x1b[?7l')
 
   report(started)
@@ -254,4 +444,53 @@ test('in the terminal: alternate screen, redrawn on event and resize, closing li
   // Afterwards nothing draws over the closing lines any more.
   out.emit('resize')
   expect(written.at(-1)).toBe('Summary: /repo/.git/groundhog/runs/x/summary.md\n')
+})
+
+test('in the terminal: reads keys in raw mode, redraws on each, hands Ctrl+C on, until it closes', () => {
+  const { input, written, stdin, show, interrupts } = terminal()
+  const { report, close } = show()
+  expect(stdin).toEqual(['raw true', 'resume'])
+  report(started)
+  for (let i = 1; i <= 5; i++) report(assistant(27, `line ${i}`))
+
+  written.length = 0
+  input.emit('data', Buffer.from(KEY.up))
+  expect(written).toHaveLength(1)
+  expect(written[0]).toContain('End to follow')
+  expect(interrupts()).toBe(0)
+  input.emit('data', Buffer.from('\x03'))
+  expect(written).toHaveLength(2)
+  expect(interrupts()).toBe(1)
+  input.emit('data', Buffer.from('\x03\x03'))
+  expect(interrupts()).toBe(3)
+
+  stdin.length = 0
+  written.length = 0
+  close()
+  close()
+  expect(stdin).toEqual(['raw false', 'pause'])
+  expect(written).toEqual(['\x1b[?7h\x1b[?25h\x1b[?1049l'])
+  input.emit('data', Buffer.from('\x03'))
+  expect(written).toHaveLength(1)
+  expect(interrupts()).toBe(3)
+  expect(input.listenerCount('data')).toBe(0)
+})
+
+test('in the terminal: the end of the run and the exit of the process leave raw mode', () => {
+  for (const end of ['run', 'exit']) {
+    const { stdin, show } = terminal()
+    const before = process.listeners('exit')
+    const { report } = show()
+    if (end === 'run')
+      report({ type: 'run-finished', finish: { type: 'none' }, summary: '', time: 0 })
+    else for (const l of process.listeners('exit')) if (!before.includes(l)) (l as () => void)()
+    expect(stdin.slice(-2)).toEqual(['raw false', 'pause'])
+  }
+})
+
+test('in the terminal: without a terminal on stdin, stdin is not touched', () => {
+  const { input, stdin, show } = terminal(false)
+  show().close()
+  expect(stdin).toEqual([])
+  expect(input.listenerCount('data')).toBe(0)
 })

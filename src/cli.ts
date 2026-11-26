@@ -82,7 +82,9 @@ async function run(spec: number): Promise<number> {
   try {
     const { directory, config, token, log } = ready
     if (process.stdout.isTTY) {
-      ;({ report: show, close } = showBoard(process.stdout, log.path))
+      // In raw mode Ctrl+C is a byte on stdin; it counts like SIGINT.
+      const interrupt = () => receive('SIGINT')
+      ;({ report: show, close } = showBoard(process.stdout, process.stdin, interrupt, log.path))
     } else {
       const lines = display({ logDir: log.path })
       show = (e) => {
