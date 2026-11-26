@@ -29,6 +29,41 @@ const result = (content: unknown, extra: object = {}) =>
     message: { content: [{ type: 'tool_result', tool_use_id: 't', content, ...extra }] },
   })
 
+test('the tool calls of a subagent carry its name, and its end shows as done with the first line of its report', () => {
+  expect(
+    text([
+      assistant({
+        type: 'tool_use',
+        id: 'a1',
+        name: 'Agent',
+        input: { description: 'Spec review' },
+      }),
+      output({
+        type: 'assistant',
+        parent_tool_use_id: 'a1',
+        message: {
+          content: [{ type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'git diff' } }],
+        },
+      }),
+      output({
+        type: 'user',
+        tool_use_result: { status: 'completed' },
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'a1', content: 'The report follows:\n  No gaps.' },
+          ],
+        },
+      }),
+    ]),
+  ).toBe(
+    [
+      '  │ ⏺ Agent Spec review',
+      '  │ ↳ Spec review · ⏺ Bash git diff',
+      '  │ ✔ Spec review done · No gaps.',
+    ].join('\n'),
+  )
+})
+
 test('the transcript shows text, tool calls with the most important argument and results on one line', () => {
   expect(
     text([

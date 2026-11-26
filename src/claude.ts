@@ -123,8 +123,16 @@ interface StreamLine {
   rate_limit_info?: { status?: string; resetsAt?: number; errorCode?: string }
   /** `assistant` and `user`: the content; `system/permission_denied`: text of the refusal. */
   message?: string | { content?: Content[] }
-  /** `user` after Edit and Write: the patch, for new files the content. */
-  tool_use_result?: { type?: string; filePath?: string; content?: string; structuredPatch?: Hunk[] }
+  /** `assistant` and `user` of a subagent: the call that started it. */
+  parent_tool_use_id?: string | null
+  /** `user` after Edit and Write: the patch, for new files the content; after Agent its status. */
+  tool_use_result?: {
+    type?: string
+    filePath?: string
+    content?: string
+    structuredPatch?: Hunk[]
+    status?: string
+  }
   /** `system/permission_denied` */
   tool_name?: string
   tool_use_id?: string
@@ -142,6 +150,8 @@ interface Content {
   input?: Input
   content?: string | { text?: string }[]
   is_error?: boolean
+  /** `tool_result`: the call it answers. */
+  tool_use_id?: string
 }
 
 type Input = Record<string, unknown>
@@ -238,34 +248,76 @@ function keyArgument(input: Input | undefined): string | undefined {
   return undefined
 }
 
-/** The transcript items of an output line; whatever isn't transcript (including non-JSON) gives none. */
-export function transcriptItems(line: string): TranscriptItem[] {
-  const l = readStreamLine(line)
-  const contents =
-    typeof l?.message === 'object' && Array.isArray(l.message.content) ? l.message.content : []
-  const out: TranscriptItem[] = []
-  for (const c of contents) {
-    if (l?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
-      out.push({ kind: 'text', text: c.text })
-    }
-    if (l?.type === 'assistant' && c.type === 'tool_use') {
-      const argument = keyArgument(c.input) ?? ''
-      out.push({ kind: 'tool', name: c.name ?? '?', argument })
-    }
-    if (l?.type === 'user' && c.type === 'tool_result') {
-      const change = diffItem(l.tool_use_result)
-      if (change) {
-        out.push(change)
+/**
+ * Reads a session's output into transcript items, line by line; whatever isn't transcript
+ * (including non-JSON) gives none. It remembers the subagents a session starts: their tool calls
+ * name them, and their end becomes one item with the first line of their report. Their own text,
+ * results and changes stay out, so they don't drown the session's. One per run is enough, since
+ * call ids are unique.
+ */
+export function transcriber(): (line: string) => TranscriptItem[] {
+  /** The description of each subagent, by the id of the call that started it. */
+  const agents = new Map<string, string>()
+  return (line) => {
+    const l = readStreamLine(line)
+    const contents =
+      typeof l?.message === 'object' && Array.isArray(l.message.content) ? l.message.content : []
+    const parent = l?.parent_tool_use_id
+    const agent = parent ? (agents.get(parent) ?? 'Subagent') : undefined
+    const out: TranscriptItem[] = []
+    for (const c of contents) {
+      if (l?.type === 'assistant' && c.type === 'tool_use') {
+        const name = c.name ?? '?'
+        const argument = keyArgument(c.input) ?? ''
+        if ((name === 'Agent' || name === 'Task') && c.id) agents.set(c.id, argument || name)
+        out.push(agent ? { kind: 'tool', name, argument, agent } : { kind: 'tool', name, argument })
         continue
       }
-      const text =
-        typeof c.content === 'string'
-          ? c.content
-          : (c.content ?? []).map((x) => x.text ?? '').join(' ')
-      out.push({ kind: 'result', text, error: c.is_error === true })
+      if (agent) continue
+      if (l?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
+        out.push({ kind: 'text', text: c.text })
+      }
+      if (l?.type === 'user' && c.type === 'tool_result') {
+        const text =
+          typeof c.content === 'string'
+            ? c.content
+            : (c.content ?? []).map((x) => x.text ?? '').join(' ')
+        const done = c.tool_use_id ? agents.get(c.tool_use_id) : undefined
+        if (done) {
+          const status = l.tool_use_result?.status
+          const error = c.is_error === true || (status !== undefined && status !== 'completed')
+          out.push({ kind: 'agent-done', agent: done, report: firstReportLine(text), error })
+          continue
+        }
+        const change = diffItem(l.tool_use_result)
+        if (change) {
+          out.push(change)
+          continue
+        }
+        out.push({ kind: 'result', text, error: c.is_error === true })
+      }
     }
+    return out
   }
-  return out
+}
+
+/**
+ * The first line of a subagent's report, without the frame Claude Code puts around it.
+ * shortcut: relies on the undocumented wording "The report follows:"; if it changes, the line
+ * shows the frame's text instead, so update the marker when that shows up.
+ */
+function firstReportLine(text: string): string {
+  const report = text.split('The report follows:').at(-1) ?? ''
+  const lines = report.replace(
+    /<tools-used-before-summary>[\s\S]*?<\/tools-used-before-summary>/g,
+    '',
+  )
+  return (
+    lines
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean) ?? ''
+  )
 }
 
 /** The change a tool result reports: its patch, for a new file the whole content as added. */

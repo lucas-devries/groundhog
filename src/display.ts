@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
 import type { Hunk } from './agent.ts'
 import { FINISH } from './choice.ts'
-import { transcriptItems } from './claude.ts'
+import { transcriber } from './claude.ts'
 import { type Event, fold, newRunState } from './run-state.ts'
 import { truncateFromStart } from './summary.ts'
 
@@ -40,6 +40,7 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
   }
 
   const state = newRunState()
+  const transcriptItems = transcriber()
 
   return (e) => {
     fold(state, e)
@@ -52,8 +53,15 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
               .filter((l) => l.trim())
               .map((l) => `  │ ${short(l, width - 4)}`)
           if (t.kind === 'tool') {
-            const argument = short(t.argument, width - 8 - t.name.length)
-            return [`  │ ${s.cyan('⏺')} ${s.bold(t.name)} ${s.dim(argument)}`]
+            const by = t.agent ? `↳ ${t.agent} · ` : ''
+            const argument = short(t.argument, width - 8 - t.name.length - by.length)
+            return [`  │ ${s.dim(by)}${s.cyan('⏺')} ${s.bold(t.name)} ${s.dim(argument)}`]
+          }
+          if (t.kind === 'agent-done') {
+            const [mark, verb] = t.error ? [s.red('✘'), 'failed'] : [s.green('✔'), 'done']
+            const head = `${t.agent} ${verb}`
+            const report = t.report ? ` · ${short(t.report, width - 10 - head.length)}` : ''
+            return [`  │ ${mark} ${s.bold(t.agent)} ${verb}${s.dim(report)}`]
           }
           if (t.kind === 'result') {
             return [`  │   ${(t.error ? s.red : s.dim)(`⎿ ${short(t.text, width - 8)}`)}`]

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { SessionRequest } from './agent.ts'
-import { claudeAgent, installedSkills, transcriptItems } from './claude.ts'
+import { claudeAgent, installedSkills, transcriber } from './claude.ts'
 import { type ClaudeAnswer, fakeClaude } from './testing/fake-claude.ts'
 
 afterEach(() => {
@@ -234,7 +234,65 @@ test('/usage reports the latest reset of the exhausted windows, otherwise nothin
   expect(calls()[0]?.stdin).toBe('/dev/null')
 })
 
+test('a subagent names its tool calls and ends in one item with the first line of its report', () => {
+  const read = transcriber()
+  const line = (o: object) => JSON.stringify(o)
+  const call = line({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', id: 'a1', name: 'Agent', input: { description: 'Spec review' } },
+      ],
+    },
+  })
+  const inside = (content: object[]) =>
+    line({ type: 'assistant', parent_tool_use_id: 'a1', message: { content } })
+  const back = (status: string, text: string) =>
+    line({
+      type: 'user',
+      tool_use_result: { status },
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'a1', content: [{ type: 'text', text }] }],
+      },
+    })
+  const report =
+    '[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n  <tools-used-before-summary>Read</tools-used-before-summary>\n  \n  No gaps against the spec.\n  Details …'
+
+  expect(read(call)).toEqual([{ kind: 'tool', name: 'Agent', argument: 'Spec review' }])
+  expect(
+    read(
+      inside([
+        { type: 'text', text: 'Reading the diff.' },
+        { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'git diff' } },
+      ]),
+    ),
+  ).toEqual([{ kind: 'tool', name: 'Bash', argument: 'git diff', agent: 'Spec review' }])
+  // Results inside the subagent stay out.
+  expect(
+    read(
+      line({
+        type: 'user',
+        parent_tool_use_id: 'a1',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'diff …' }] },
+      }),
+    ),
+  ).toEqual([])
+  expect(read(back('completed', report))).toEqual([
+    { kind: 'agent-done', agent: 'Spec review', report: 'No gaps against the spec.', error: false },
+  ])
+  expect(transcriberEnd(back('failed', 'Agent crashed'))).toEqual([
+    { kind: 'agent-done', agent: 'Spec review', report: 'Agent crashed', error: true },
+  ])
+
+  function transcriberEnd(text: string) {
+    const fresh = transcriber()
+    fresh(call)
+    return fresh(text)
+  }
+})
+
 test('a line of the stream becomes transcript items that know nothing of stream-json', () => {
+  const transcriptItems = transcriber()
   const assistant = JSON.stringify({
     type: 'assistant',
     message: {

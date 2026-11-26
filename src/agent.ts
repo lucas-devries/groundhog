@@ -45,9 +45,12 @@ export interface Block {
 /** One thing a line of a session's output shows in the transcript. */
 export type TranscriptItem =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; name: string; argument: string }
+  /** `agent`: the subagent that made the call; none for the session itself. */
+  | { kind: 'tool'; name: string; argument: string; agent?: string }
   | { kind: 'result'; text: string; error: boolean }
   | { kind: 'diff'; file: string; hunks: Hunk[] }
+  /** A subagent came back; `report` is the first line of what it reported. */
+  | { kind: 'agent-done'; agent: string; report: string; error: boolean }
 
 /** A coherent part of a change; each line starts with `+`, `-` or a space. */
 export interface Hunk {
