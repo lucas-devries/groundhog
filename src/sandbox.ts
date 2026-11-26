@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime'
 import { git } from './git.ts'
+import { runInProcessGroup } from './process-group.ts'
 
 export interface Execution {
   exitCode: number
@@ -55,40 +55,21 @@ export function srtSandbox(hosts: string[], gitDir: string): SrtSandbox {
   }
 }
 
-/** Starts `argv` and collects the output. If `signal` aborts, the whole process group dies. */
-function run(
-  [file = '', ...args]: string[],
+/** Runs `argv` in its own process group and collects the output. */
+async function run(
+  argv: string[],
   { directory, signal }: { directory: string; signal: AbortSignal },
   shell = false,
 ): Promise<Execution> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, {
-      cwd: directory,
-      shell,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Own process group, so that an abort also hits the shell's child processes.
-      detached: true,
-    })
-    const kill = () => {
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-      } catch {
-        // The group is already gone.
-      }
+  let output = ''
+  const code = await runInProcessGroup(argv, { cwd: directory, shell, signal }, (...streams) => {
+    for (const stream of streams) {
+      stream.on('data', (d) => {
+        output += d
+      })
     }
-    if (signal.aborted) kill()
-    signal.addEventListener('abort', kill, { once: true })
-    child.on('close', () => signal.removeEventListener('abort', kill))
-    let output = ''
-    child.stdout.on('data', (d) => {
-      output += d
-    })
-    child.stderr.on('data', (d) => {
-      output += d
-    })
-    child.on('error', reject)
-    child.on('close', (code) => resolve({ exitCode: code ?? 1, output }))
   })
+  return { exitCode: code ?? 1, output }
 }
 
 /** The fixed host list every sandbox reaches; `sandbox.hosts` comes on top. */

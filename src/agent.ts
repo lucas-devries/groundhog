@@ -42,6 +42,20 @@ export interface Block {
   reason?: string
 }
 
+/** One thing a line of a session's output shows in the transcript. */
+export type TranscriptItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; argument: string }
+  | { kind: 'result'; text: string; error: boolean }
+  | { kind: 'diff'; file: string; hunks: Hunk[] }
+
+/** A coherent part of a change; each line starts with `+`, `-` or a space. */
+export interface Hunk {
+  oldStart: number
+  newStart: number
+  lines: string[]
+}
+
 /** The agent: starts a session on a ticket. Behind it: Claude adapter (#33), fake agent. */
 export interface Agent {
   runSession(request: SessionRequest): Promise<SessionResult>

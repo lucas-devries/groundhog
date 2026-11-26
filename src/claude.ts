@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import type { Agent, SessionResult } from './agent.ts'
+import type { Agent, Hunk, SessionResult, TranscriptItem } from './agent.ts'
+import { runInProcessGroup } from './process-group.ts'
 import type { SrtSandbox } from './sandbox.ts'
 
 export interface ClaudeOptions {
@@ -27,6 +27,9 @@ function afkNote(forkPoint: string): string {
     `Work in this order: implement the ticket, commit, review with mattpocock-skills:code-review against ${forkPoint}, fix the findings, then squash everything since ${forkPoint} into one commit with a short message covering the whole work on the ticket.`,
   ].join('\n')
 }
+
+/** `/usage` calls no model and no tool and costs nothing. */
+const USAGE = ['-p', '/usage', '--output-format', 'stream-json', '--verbose']
 
 /** The agent behind `claude -p`. */
 export function claudeAgent(options: ClaudeOptions): Agent {
@@ -56,19 +59,15 @@ export function claudeAgent(options: ClaudeOptions): Agent {
       return stream.result(exitCode)
     },
 
-    // `/usage` calls no model and no tool and costs nothing; it runs without a sandbox.
+    // `/usage` runs without a sandbox.
     async exhaustedUntil() {
       let until: number | undefined
-      await startProcess(
-        ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose'],
-        { directory: process.cwd(), env },
-        (line) => {
-          for (const window of readStreamLine(line)?.usage_report?.rate_limits?.limits ?? []) {
-            if (window.percent < 100 || !window.resets_at) continue
-            until = Math.max(until ?? 0, Date.parse(window.resets_at))
-          }
-        },
-      )
+      await startProcess(['claude', ...USAGE], { directory: process.cwd(), env }, (line) => {
+        for (const window of readStreamLine(line)?.usage_report?.rate_limits?.limits ?? []) {
+          if (window.percent < 100 || !window.resets_at) continue
+          until = Math.max(until ?? 0, Date.parse(window.resets_at))
+        }
+      })
       return until
     },
   }
@@ -87,52 +86,32 @@ function environment(token: string): NodeJS.ProcessEnv {
   return { ...env, GH_TOKEN: token }
 }
 
-/**
- * Starts `argv` (`claude`, possibly in the sandbox) with stdin on `/dev/null` and passes on every
- * line of stdout and stderr. If `signal` aborts, the whole process group dies. Returns the exit
- * code (`null` after a signal).
- */
+/** Starts `argv` (`claude`, possibly in the sandbox) and passes on every line of stdout and stderr. */
 function startProcess(
-  [file = '', ...args]: string[],
+  argv: string[],
   { directory, env, signal }: { directory: string; env: NodeJS.ProcessEnv; signal?: AbortSignal },
   onLine: (line: string) => void,
 ): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, {
-      cwd: directory,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Own process group, so that an abort also hits the session's child processes.
-      detached: true,
-    })
-    const kill = () => {
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-      } catch {
-        // The group is already gone.
-      }
-    }
-    if (signal?.aborted) kill()
-    signal?.addEventListener('abort', kill, { once: true })
+  return runInProcessGroup(argv, { cwd: directory, env, signal }, (stdout, stderr) => {
     // stderr ends up in the log too; the evaluation skips lines that aren't JSON.
-    createInterface({ input: child.stdout }).on('line', onLine)
-    createInterface({ input: child.stderr }).on('line', onLine)
-    child.on('error', reject)
-    child.on('close', (code) => {
-      signal?.removeEventListener('abort', kill)
-      resolve(code)
-    })
+    createInterface({ input: stdout }).on('line', onLine)
+    createInterface({ input: stderr }).on('line', onLine)
   })
 }
 
+interface Plugin {
+  name: string
+  version?: string
+}
+
 /** A line of `stream-json` with the fields groundhog reads; many of them are undocumented. */
-export interface StreamLine {
+interface StreamLine {
   type?: string
   subtype?: string
   session_id?: string
   /** `system/init` */
   skills?: string[]
-  plugins?: { name: string; version?: string }[]
+  plugins?: Plugin[]
   /** `result` */
   is_error?: boolean
   usage?: Record<string, unknown>
@@ -155,7 +134,7 @@ export interface StreamLine {
 }
 
 /** A part of the content: text, `tool_use` or `tool_result`. */
-export interface Content {
+interface Content {
   type?: string
   id?: string
   text?: string
@@ -165,16 +144,10 @@ export interface Content {
   is_error?: boolean
 }
 
-export interface Hunk {
-  oldStart: number
-  newStart: number
-  lines: string[]
-}
-
 type Input = Record<string, unknown>
 
 /** Reads a line of `stream-json`; a non-JSON line gives `undefined`. */
-export function readStreamLine(line: string): StreamLine | undefined {
+function readStreamLine(line: string): StreamLine | undefined {
   try {
     return JSON.parse(line)
   } catch {
@@ -257,10 +230,69 @@ function evaluation() {
 }
 
 /** The most important argument of a tool call, for transcript and blocks. */
-export function keyArgument(input: Input | undefined): string | undefined {
+function keyArgument(input: Input | undefined): string | undefined {
   for (const field of ['command', 'file_path', 'pattern', 'url', 'description']) {
     const value = input?.[field]
     if (typeof value === 'string') return value
   }
   return undefined
+}
+
+/** The transcript items of an output line; whatever isn't transcript (including non-JSON) gives none. */
+export function transcriptItems(line: string): TranscriptItem[] {
+  const l = readStreamLine(line)
+  const contents =
+    typeof l?.message === 'object' && Array.isArray(l.message.content) ? l.message.content : []
+  const out: TranscriptItem[] = []
+  for (const c of contents) {
+    if (l?.type === 'assistant' && c.type === 'text' && c.text?.trim()) {
+      out.push({ kind: 'text', text: c.text })
+    }
+    if (l?.type === 'assistant' && c.type === 'tool_use') {
+      const argument = keyArgument(c.input) ?? ''
+      out.push({ kind: 'tool', name: c.name ?? '?', argument })
+    }
+    if (l?.type === 'user' && c.type === 'tool_result') {
+      const change = diffItem(l.tool_use_result)
+      if (change) {
+        out.push(change)
+        continue
+      }
+      const text =
+        typeof c.content === 'string'
+          ? c.content
+          : (c.content ?? []).map((x) => x.text ?? '').join(' ')
+      out.push({ kind: 'result', text, error: c.is_error === true })
+    }
+  }
+  return out
+}
+
+/** The change a tool result reports: its patch, for a new file the whole content as added. */
+function diffItem(result: StreamLine['tool_use_result']): TranscriptItem | undefined {
+  let hunks: Hunk[] = Array.isArray(result?.structuredPatch) ? result.structuredPatch : []
+  if (hunks.length === 0 && result?.type === 'create' && typeof result.content === 'string') {
+    const lines = result.content
+      .replace(/\n$/, '')
+      .split('\n')
+      .map((x) => `+${x}`)
+    hunks = [{ oldStart: 1, newStart: 1, lines }]
+  }
+  return hunks.length > 0 ? { kind: 'diff', file: result?.filePath ?? '', hunks } : undefined
+}
+
+/**
+ * The installed skills and plugins, as the `init` event of `/usage` reports
+ * them. `claude` runs the `claude` CLI with the given arguments and returns its stdout.
+ */
+export function installedSkills(claude: (args: string[]) => string): {
+  skills: string[]
+  plugins: Plugin[]
+} {
+  let init: StreamLine = {}
+  for (const line of claude(USAGE).split('\n')) {
+    const l = readStreamLine(line)
+    if (l?.type === 'system' && l.subtype === 'init') init = l
+  }
+  return { skills: init.skills ?? [], plugins: init.plugins ?? [] }
 }

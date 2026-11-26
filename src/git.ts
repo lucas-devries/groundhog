@@ -22,3 +22,7 @@ export function gitWithHooks(directory: string, ...args: string[]): string {
 export function commonDir(directory: string): string {
   return resolve(directory, git(directory, 'rev-parse', '--git-common-dir'))
 }
+
+export function branchExists(directory: string, branch: string): boolean {
+  return git(directory, 'branch', '--list', branch) !== ''
+}

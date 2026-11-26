@@ -1,9 +1,9 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { SessionRequest } from './agent.ts'
-import { claudeAgent } from './claude.ts'
+import { claudeAgent, installedSkills, transcriptItems } from './claude.ts'
 import { type ClaudeAnswer, fakeClaude } from './testing/fake-claude.ts'
 
 afterEach(() => {
@@ -232,4 +232,56 @@ test('/usage reports the latest reset of the exhausted windows, otherwise nothin
   expect(await agent.exhaustedUntil()).toBeUndefined()
   expect(calls()[0]?.args.slice(0, 2)).toEqual(['-p', '/usage'])
   expect(calls()[0]?.stdin).toBe('/dev/null')
+})
+
+test('a line of the stream becomes transcript items that know nothing of stream-json', () => {
+  const assistant = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool_use', id: 't', name: 'Read', input: { file_path: '/repo/a.ts' } },
+      ],
+    },
+  })
+  const user = (extra: object) =>
+    JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', content: [{ text: 'boom' }], is_error: true }] },
+      ...extra,
+    })
+
+  expect(transcriptItems(assistant)).toEqual([
+    { kind: 'text', text: 'Reading.' },
+    { kind: 'tool', name: 'Read', argument: '/repo/a.ts' },
+  ])
+  expect(transcriptItems(user({}))).toEqual([{ kind: 'result', text: 'boom', error: true }])
+  expect(
+    transcriptItems(
+      user({ tool_use_result: { type: 'create', filePath: '/repo/b.ts', content: 'x\n' } }),
+    ),
+  ).toEqual([
+    { kind: 'diff', file: '/repo/b.ts', hunks: [{ oldStart: 1, newStart: 1, lines: ['+x'] }] },
+  ])
+  expect(transcriptItems('stderr, not JSON')).toEqual([])
+})
+
+test('the installed skills and plugin versions come from the init event of /usage', () => {
+  const calls: string[][] = []
+  const recording = readFileSync(
+    new URL('./testing/recordings/claude-init-with-skills.jsonl', import.meta.url),
+    'utf8',
+  )
+
+  const installed = installedSkills((args) => {
+    calls.push(args)
+    return recording
+  })
+
+  expect(calls).toEqual([['-p', '/usage', '--output-format', 'stream-json', '--verbose']])
+  expect(installed.skills).toContain('mattpocock-skills:implement')
+  expect(installed.plugins).toContainEqual(
+    expect.objectContaining({ name: 'mattpocock-skills', version: '1.3.2' }),
+  )
+  expect(installedSkills(() => 'no init')).toEqual({ skills: [], plugins: [] })
 })

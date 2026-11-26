@@ -1,17 +1,15 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
-import { readStreamLine, type StreamLine } from './claude.ts'
+import { accessSync, constants } from 'node:fs'
+import { installedSkills } from './claude.ts'
 import { type Config, readConfig } from './config.ts'
-import { type Choice, type Event, FINISH, integrationBranch, ticketBranchOf } from './engine.ts'
+import { type Choice, FINISH, integrationBranch } from './engine.ts'
 import { commonDir, git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { takeLock } from './lock.ts'
-import { type Log, openLog } from './log.ts'
+import { runsFolder } from './log.ts'
 import { type SrtSandbox, sandboxMissing, srtSandbox } from './sandbox.ts'
 import { frontierState, isReady, type Ticket } from './tracker.ts'
+import { checkedOutElsewhere, worktreePaths } from './worktree.ts'
 
 /** The answer of `@clack/prompts` to Ctrl+C. */
 export type CtrlC = symbol
@@ -57,8 +55,6 @@ export interface StartOptions {
     /** Installs the tag; throws with a message if that fails. */
     install: (tag: string) => void
   }
-  /** Gets every event after the log has written it. */
-  next?: (event: Event) => void
 }
 
 /** Everything the runs of the batch need after the menu. */
@@ -80,8 +76,6 @@ export interface Ready {
   /** The `srt` sandbox; `undefined` only with `sandbox.off`. */
   sandbox: SrtSandbox | undefined
   versions: Record<string, string>
-  /** The log of the first run; every later run opens its own. */
-  log: Log
   /** Releases the lock; call on every end. */
   release: () => void
 }
@@ -102,7 +96,7 @@ class Abort extends Error {
 }
 
 /**
- * Start of a batch up to the end of the menu: start checks, lock, selection, log, menu. Changes
+ * Start of a batch up to the end of the menu: start checks, lock, selection, menu. Changes
  * neither repo nor tracker; on every abort the lock is free again.
  */
 export async function start({
@@ -112,7 +106,6 @@ export async function start({
   isTerminal,
   sandboxMissing: missing = sandboxMissing,
   update,
-  next,
 }: StartOptions): Promise<Start> {
   let release = () => {}
   try {
@@ -216,18 +209,21 @@ export async function start({
     }
 
     const specs = named.length > 0 ? named : await selection(dialog, tracker)
-    const worktreePath = worktrees(directory)
+    const worktreePath = worktreePaths(directory)
     let repoUrl = ''
     for (const spec of specs) {
       repoUrl = await startCheck(tracker, spec)
-      await branchCheck(directory, spec, worktreePath(spec), tracker)
+      const held = await checkedOutElsewhere(directory, spec, worktreePath(spec), tracker)
+      if (held) {
+        throw new Abort(`${held.branch} is checked out in ${held.path}; switch away first.`)
+      }
     }
 
     if (!isTerminal) throw new Abort('groundhog needs a terminal on stdin for the menu.')
 
-    let log: Log
+    // Each run opens its log only later; whether it can is a start check, before any question.
     try {
-      log = openLog({ directory, spec: specs[0] as number, start: Date.now(), next })
+      accessSync(runsFolder(directory), constants.W_OK)
     } catch (error) {
       throw new Abort(`The log folder cannot be created: ${(error as Error).message}`)
     }
@@ -263,7 +259,6 @@ export async function start({
       repoUrl,
       sandbox,
       versions,
-      log,
       release,
     }
   } catch (error) {
@@ -271,28 +266,6 @@ export async function start({
     const exitCode = error instanceof Abort ? error.exitCode : 1
     return { ok: false, exitCode, message: (error as Error).message }
   }
-}
-
-/**
- * Where the worktrees of a clone lie, outside the repo (ADR 0001). The hash of the shared git
- * directory keeps two clones apart and gives every worktree of one clone the same folder.
- */
-function worktrees(directory: string): (spec: number) => string {
-  const main = listWorktrees(directory)[0]?.path ?? ''
-  const hash = createHash('sha256').update(commonDir(directory)).digest('hex').slice(0, 8)
-  const folder = `${basename(main)}-${hash}`
-  const root = join(homedir(), '.cache/groundhog/worktrees', folder)
-  return (spec) => join(root, `spec-${spec}`)
-}
-
-/** The worktrees git lists for the clone; the main one comes first, wherever git is asked from. */
-function listWorktrees(directory: string): { path: string; branch: string | undefined }[] {
-  return git(directory, 'worktree', 'list', '--porcelain')
-    .split('\n\n')
-    .map((block) => ({
-      path: block.match(/^worktree (.*)$/m)?.[1] ?? '',
-      branch: block.match(/^branch refs\/heads\/(.*)$/m)?.[1],
-    }))
 }
 
 /** Runs a tool and returns stdout; if it is missing in the `PATH`, the start aborts. */
@@ -329,25 +302,14 @@ const INSTALLATION = [
 ]
 
 /**
- * The missing skills according to the `init` event of `claude -p /usage` (no model, no cost);
- * records the version of the skill plugin in `versions`.
+ * The missing skills, as the Claude adapter reports the installed ones; records the version of the
+ * skill plugin in `versions`.
  */
 function skills(directory: string, versions: Record<string, string>): string[] {
-  const output = tool(directory, 'claude', [
-    '-p',
-    '/usage',
-    '--output-format',
-    'stream-json',
-    '--verbose',
-  ])
-  let init: StreamLine = {}
-  for (const line of output.split('\n')) {
-    const l = readStreamLine(line)
-    if (l?.type === 'system' && l.subtype === 'init') init = l
-  }
-  const version = init.plugins?.find((p) => p.name === 'mattpocock-skills')?.version
+  const installed = installedSkills((args) => tool(directory, 'claude', args))
+  const version = installed.plugins.find((p) => p.name === 'mattpocock-skills')?.version
   if (version) versions['mattpocock-skills'] = version
-  return SKILLS.filter((s) => !init.skills?.includes(s))
+  return SKILLS.filter((s) => !installed.skills.includes(s))
 }
 
 /** The human chooses the batch from the ready specs, which run oldest first. */
@@ -391,33 +353,6 @@ async function startCheck(tracker: GitHubTracker, spec: number): Promise<string>
     )
   }
   return check.url
-}
-
-/**
- * Git refuses to check out a branch in two worktrees, so no branch of the spec may be checked out
- * outside the run's own worktree. The human's branch is never switched for them.
- */
-async function branchCheck(directory: string, spec: number, own: string, tracker: GitHubTracker) {
-  const elsewhere = listWorktrees(directory).filter(
-    (w) => resolvedPath(w.path) !== resolvedPath(own),
-  )
-  let found = elsewhere.find((w) => w.branch === integrationBranch(spec))
-  // A ticket branch does not name its spec, so only the tracker knows whether it is one of ours.
-  if (!found && elsewhere.some((w) => w.branch?.startsWith('ticket/'))) {
-    const tickets = await tracker.taskGraph(spec)
-    found = elsewhere.find((w) => tickets.some((t) => w.branch === ticketBranchOf(t.number)))
-  }
-  if (found) throw new Abort(`${found.branch} is checked out in ${found.path}; switch away first.`)
-}
-
-/** `realpath` that also works for a missing folder, as a stale worktree registration has one. */
-function resolvedPath(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    const parent = dirname(path)
-    return parent === path ? path : join(resolvedPath(parent), basename(path))
-  }
 }
 
 /** The size of a run, as the selection and the "This run" note show it. */

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { expect, test } from 'vitest'
 import { board, showBoard } from './board.ts'
-import type { Event } from './engine.ts'
+import type { Event } from './run-state.ts'
 import { frontierState, type Ticket } from './tracker.ts'
 
 /** The board's screen after a sequence of events, without colours. */
@@ -741,4 +741,15 @@ test('a ticket with a title shows it after its state, so the board says what is 
     '  #27 ▶ running · GitHub adapter',
     '  #28 · waiting · Board',
   ])
+})
+
+test('a warning before the first run belongs to no spec of the batch', () => {
+  const b = board({}, [
+    { spec: 25, tickets: [] },
+    { spec: 31, tickets: [] },
+  ])
+  // The log warns before it passes on the event it could not write.
+  b.report({ type: 'warning', text: 'Log incomplete', time: 0 })
+  b.report(started)
+  expect(b.screen(60, 14).slice(2, 6)).toEqual(['Spec #25', 'Spec #31', '⚠ Log incomplete', rule])
 })

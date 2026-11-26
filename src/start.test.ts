@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -179,14 +180,13 @@ test('from a subdirectory the run starts in the repo root', async () => {
   expect(result).toMatchObject({ ok: true, directory: realpathSync(clone) })
 })
 
-test('the start creates the log folder before the menu', async () => {
+test('the start creates the log folder before the menu, but opens no log', async () => {
   const { clone, path } = ready()
 
   const { result } = await run({ clone, path }, ['main', 'pr'])
 
-  if (!result.ok) throw new Error(result.message)
-  expect(result.log.path).toMatch(/\.git\/groundhog\/runs\/\d{8}-\d{6}-spec-25$/)
-  expect(existsSync(result.log.path)).toBe(true)
+  expect(result.ok).toBe(true)
+  expect(readdirSync(join(clone, '.git/groundhog/runs'))).toEqual([])
 })
 
 test('if the log folder cannot be created, the start aborts before the menu', async () => {
@@ -381,8 +381,6 @@ test('the worktree lies in the cache, at the same path from the clone and from a
     const { result } = await run({ clone: directory, path }, ['main', 'pr'])
     if (!result.ok) throw new Error(result.message)
     result.release()
-    // Two starts within one second would share the log folder name.
-    rmSync(result.log.path, { recursive: true })
     return result.worktree(25)
   }
 
@@ -447,8 +445,6 @@ test.each([
     const earlier = await run(first, ['main', 'pr'])
     if (!earlier.result.ok) throw new Error(earlier.result.message)
     earlier.result.release()
-    // Two starts within one second would share the log folder name.
-    rmSync(earlier.result.log.path, { recursive: true })
     const own = earlier.result.worktree(25)
     git(first.clone, 'worktree', 'add', '-q', own, '-b', 'spec/25')
     if (gone) rmSync(own, { recursive: true })
@@ -793,7 +789,6 @@ test('without specs the selection offers the ready specs, oldest first and all p
     choice: { targetBranch: 'develop', finish: 'pr' },
   })
   if (!result.ok) return
-  expect(result.log.path).toMatch(/-spec-25$/)
   expect(JSON.parse(readFileSync(lock(clone), 'utf8'))).not.toHaveProperty('spec')
   result.release()
   expect(existsSync(lock(clone))).toBe(false)

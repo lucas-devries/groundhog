@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Event } from './engine.ts'
 import { commonDir } from './git.ts'
+import { type Event, fold, newRunState } from './run-state.ts'
 
 /** This many runs stay in the log per clone, the new one included. */
 const KEEP = 10
@@ -11,6 +11,13 @@ export interface Log {
   path: string
   /** Writes an event of the engine to the log and passes it on. */
   report: (event: Event) => void
+}
+
+/** The folder with the logs of a clone's runs, `.git/groundhog/runs/`; creates it or throws. */
+export function runsFolder(directory: string): string {
+  const runs = join(commonDir(directory), 'groundhog', 'runs')
+  mkdirSync(runs, { recursive: true })
+  return runs
 }
 
 /**
@@ -27,17 +34,15 @@ export function openLog(options: {
   next?: (event: Event) => void
 }): Log {
   const { directory, spec, start, next } = options
-  const runs = join(commonDir(directory), 'groundhog', 'runs')
+  const runs = runsFolder(directory)
   const path = join(runs, `${timestamp(new Date(start))}-spec-${spec}`)
-  mkdirSync(runs, { recursive: true })
   mkdirSync(path)
   // The names start with the start time, so they sort chronologically.
   for (const old of readdirSync(runs).sort().slice(0, -KEEP)) {
     rmSync(join(runs, old), { recursive: true, force: true })
   }
 
-  // The checks run after the session that finished last.
-  let lastSession = ''
+  const state = newRunState()
   let warned = false
   const write = (file: string, text: string, time: number) => {
     try {
@@ -53,14 +58,16 @@ export function openLog(options: {
     }
   }
   const log = (e: Event) => {
+    const { lastSession } = fold(state, e)
     if (e.type === 'session-output') {
       write(`ticket-${e.ticket}-session-${e.session}.jsonl`, `${e.line}\n`, e.time)
       return
     }
-    if (e.type === 'session-finished') lastSession = `ticket-${e.ticket}-session-${e.session}`
     if (e.type === 'verification' && e.command !== undefined && e.output !== undefined) {
       const { output, command, ...withoutOutput } = e
-      write(`${lastSession}-checks.log`, asRun(command, output), e.time)
+      // The checks run after the session that finished last.
+      const session = lastSession && `ticket-${lastSession.ticket}-session-${lastSession.session}`
+      write(`${session ?? ''}-checks.log`, asRun(command, output), e.time)
       e = withoutOutput
     }
     if (e.type === 'run-finished') {

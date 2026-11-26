@@ -1,6 +1,13 @@
 import { stripVTControlCharacters } from 'node:util'
 import { type DisplayOptions, display, style, timeOfDay } from './display.ts'
-import type { Event, GraphTicket } from './engine.ts'
+import {
+  type Event,
+  fold,
+  type GraphTicket,
+  newRunState,
+  type RunState,
+  type TicketState,
+} from './run-state.ts'
 
 export type BoardOptions = Omit<DisplayOptions, 'width'>
 
@@ -41,14 +48,16 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
   // Untruncated; truncation happens only when drawing, to the width the window has right now.
   let lines = display({ ...options, width: Number.POSITIVE_INFINITY })
   let header = ''
-  /** The tickets per spec, in the order of the batch; outside a batch only the spec of the run. */
-  const sections = new Map(plan.map((p) => [p.spec, p.tickets]))
-  const batch = sections.size > 1
+  /** The state per spec, in the order of the batch; outside a batch only the spec of the run. */
+  const runs = new Map(plan.map((p) => [p.spec, newRunState(p.tickets)]))
+  const batch = runs.size > 1
   let current = 0
-  /** State of the tickets this run has touched; the others show the tracker. */
-  const state = new Map<number, string>()
-  /** Tickets this run has finished. */
-  const done = new Set<number>()
+  /** The state of the run of a spec. */
+  const runOf = (spec: number): RunState => {
+    const run = runs.get(spec) ?? newRunState()
+    runs.set(spec, run)
+    return run
+  }
   const warnings: string[] = []
   const transcript: string[] = []
   /** Transcript line at the top while scrolled up; `undefined` follows the live end. */
@@ -58,9 +67,6 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
   /** Height of the transcript as `screen` drew it last. */
   let room = 0
   let footer = ''
-  /** ` · Attempt n of m` from the second attempt on; the first is just running. */
-  let attempt = ''
-  let failed = ''
   /** The lines of a failing `setup`; the closing lines repeat them. */
   let setupLines: string[] = []
   const append = (added: string[]) => {
@@ -74,35 +80,21 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
 
   const report = (e: Event): string[] => {
     const added = lines(e)
+    if (e.type === 'run-started') current = e.spec
+    // Before the first run there is no spec: a warning of the log then changes no state.
+    if (current) fold(runOf(current), e)
     switch (e.type) {
       case 'run-started':
         header = added[0] ?? ''
-        current = e.spec
         if (batch) append([s.bold(`━━ Spec #${e.spec}`)])
         break
-      case 'task-graph':
-        sections.set(current, e.tickets)
-        break
       case 'attempt-started':
-        attempt = e.attempt > 1 ? ` · Attempt ${e.attempt} of ${e.of}` : ''
-        failed = `Attempt ${e.attempt} of ${e.of} failed`
-        state.set(e.ticket, s.cyan(`▶ running${attempt}`))
-        footer = `#${e.ticket}${attempt}`
+        footer = `#${e.ticket}${attemptSuffix(runOf(current).tickets.get(e.ticket) as TicketState)}`
         append([s.bold(`━━ ${footer}`)])
         break
       case 'session-output':
-        // Also ends a pause: the attempt restarted in a new session.
-        state.set(e.ticket, s.cyan(`▶ running${attempt}`))
-        append(added)
-        break
       case 'verification':
-        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${failed}`))
-        append(added)
-        break
       case 'pause':
-        state.set(e.ticket, s.yellow(`⏸ Pause at usage limit until ${timeOfDay(e.reset, e.time)}`))
-        append(added)
-        break
       case 'session-finished':
         append(added)
         break
@@ -113,13 +105,6 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
       case 'run-finished':
         // The board is gone after this event; the failing command must stay readable.
         return [...setupLines, ...added]
-      case 'ticket-done':
-        done.add(e.ticket)
-        state.set(e.ticket, s.green(e.attempts > 1 ? `✔ done in attempt ${e.attempts}` : '✔ done'))
-        break
-      case 'ticket-failed':
-        state.set(e.ticket, s.red(`✘ ready-for-human · ${e.verification}`))
-        break
       case 'warning':
         warnings.push(...added)
         break
@@ -172,25 +157,30 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
    */
   const taskGraph = (max: number) => {
     const [mustStay, open, finished] = [0, 1, 2]
+    /** What the runs say about a ticket; the others show the tracker. */
+    const touched = new Map([...runs.values()].flatMap((run) => [...run.tickets]))
     /** The lower, the later a ticket is left out. */
     const rank = (t: GraphTicket) => {
-      if (done.has(t.number)) return finished
-      if (state.has(t.number)) return mustStay
+      const status = touched.get(t.number)?.status
+      if (status === 'done') return finished
+      if (status) return mustStay
       return t.state === 'closed' ? finished : open
     }
-    const tickets = [...sections.values()].flat()
-    const headings = batch ? sections.size : 0
+    const tickets = [...runs.values()].flatMap((run) => run.graph)
+    const headings = batch ? runs.size : 0
     const staying = tickets.filter((t) => rank(t) === mustStay).length
     const room = max - headings
     // One line less than `room` for the line that sums up the others.
     const slots = tickets.length > room ? Math.max(staying, room - 1) : room
     const shown = new Set(tickets.toSorted((a, b) => rank(a) - rank(b)).slice(0, slots))
-    const line = (t: GraphTicket) =>
-      `  #${t.number} ${state.get(t.number) ?? before(t, s)}${t.title ? ` · ${t.title}` : ''}`
+    const line = (t: GraphTicket) => {
+      const state = touchedLabel(touched.get(t.number), s) ?? before(t, s)
+      return `  #${t.number} ${state}${t.title ? ` · ${t.title}` : ''}`
+    }
     const graph = batch
-      ? [...sections].flatMap(([spec, list]) => [
+      ? [...runs].flatMap(([spec, run]) => [
           spec === current ? s.bold(`Spec #${spec}`) : `Spec #${spec}`,
-          ...list.filter((t) => shown.has(t)).map(line),
+          ...run.graph.filter((t) => shown.has(t)).map(line),
         ])
       : tickets.filter((t) => shown.has(t)).map(line)
     const more = tickets.length - shown.size
@@ -226,6 +216,31 @@ export function board(options: BoardOptions = {}, plan: Section[] = []) {
   }
 
   return { report, input, screen, next }
+}
+
+/** ` · Attempt n of m` from the second attempt on; the first is just running. */
+function attemptSuffix({ attempt, of }: TicketState): string {
+  return attempt > 1 ? ` · Attempt ${attempt} of ${of}` : ''
+}
+
+/** State of a ticket its run is working or has worked on. */
+function touchedLabel(t: TicketState | undefined, s: ReturnType<typeof style>): string | undefined {
+  switch (t?.status) {
+    case undefined:
+      return undefined
+    case 'running':
+      return s.cyan(`▶ running${attemptSuffix(t)}`)
+    case 'attempt-failed':
+      return s.yellow(`↻ Attempt ${t.attempt} of ${t.of} failed`)
+    case 'paused': {
+      const { reset, time } = t.pause as NonNullable<TicketState['pause']>
+      return s.yellow(`⏸ Pause at usage limit until ${timeOfDay(reset, time)}`)
+    }
+    case 'done':
+      return s.green(t.attempt > 1 ? `✔ done in attempt ${t.attempt}` : '✔ done')
+    case 'failed':
+      return s.red(`✘ ready-for-human · ${t.verification}`)
+  }
 }
 
 /** State of a ticket this run has not touched (yet), as the engine reports it. */
