@@ -31,10 +31,12 @@
     "node": ">=24"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "prepack": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "fallow": "fallow"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.83",
@@ -45,6 +47,7 @@
     "@biomejs/biome": "^2.6.9",
     "@types/node": "^24.19.4",
     "@vitest/coverage-v8": "^5.1.2",
+    "fallow": "3.49.0",
     "typescript": "^7.0.2",
     "vitest": "^5.1.2"
   }

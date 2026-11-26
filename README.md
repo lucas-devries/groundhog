@@ -137,7 +137,7 @@ groundhog reports every error in the file at once, unknown keys included, so a t
 
 ## Safety
 
-The engine runs outside the sandbox. It holds your `gh` token and does every git step itself: branches, the squash, fast-forward, push and finish. The agent only edits files and commits.
+The engine runs outside the sandbox. It holds your `gh` token and does every git step itself, without running any git hooks: branches, the squash, fast-forward, push and finish. The agent only edits files and commits.
 
 Every session, its checks and `setup` run inside `srt`:
 
@@ -188,7 +188,10 @@ npm ci
 npm run typecheck
 npm run lint
 npm test
+npm run fallow   # unused code, cycles, duplication, complexity
 ```
+
+`npm ci` points git at `.githooks/`, so every commit runs typecheck, lint, tests and `fallow dead-code` first, whoever makes it, a human or an agent. groundhog's engine runs its own git steps without hooks: it works outside the sandbox, and a hook in the working tree is the agent's to change.
 
 The engine is tested from the outside, with real git against throwaway repos. Fakes stand in for the tracker, the agent, the clock and the sandbox. No test starts a real Claude session or calls GitHub.
 

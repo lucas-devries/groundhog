@@ -4,9 +4,15 @@ import { resolve } from 'node:path'
 /**
  * Runs `git` in the directory and returns stdout without trailing whitespace. Throws on exit ≠ 0.
  * Runs in its own process group (without a terminal): the first Ctrl+C aborts nothing, so it must
- * not hit `git` either.
+ * not hit `git` either. Without hooks: the engine runs outside the sandbox, and a hook in the
+ * working tree is the agent's to change, so it must never run here.
  */
 export function git(directory: string, ...args: string[]): string {
+  return gitWithHooks(directory, '-c', 'core.hooksPath=/dev/null', ...args)
+}
+
+/** Like `git`, but with the repo's hooks: for a commit the human asked for, like the one of `init`. */
+export function gitWithHooks(directory: string, ...args: string[]): string {
   // Node honours `detached` for the sync variant too; only the types don't know it there.
   const options = { cwd: directory, encoding: 'utf8', stdio: 'pipe', detached: true } as const
   return execFileSync('git', args, options).trimEnd()

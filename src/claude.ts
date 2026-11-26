@@ -17,7 +17,7 @@ export interface ClaudeOptions {
 }
 
 /** The AFK note every session gets via `--append-system-prompt`. */
-export function afkNote(forkPoint: string): string {
+function afkNote(forkPoint: string): string {
   return [
     'You are running AFK: no human is available and nobody will answer a question.',
     'Never ask. Where a skill says to confirm something or ask the user, take the most obvious reading, decide yourself, note the decision and its reason, and continue.',

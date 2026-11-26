@@ -3,7 +3,7 @@ import { setTimeout } from 'node:timers/promises'
 import { type Pr, READY_FOR_AGENT, READY_FOR_HUMAN, type Ticket, type Tracker } from './tracker.ts'
 
 /** Delays before the retries when GitHub is unreachable: three retries in a little over a minute. */
-export const RETRY_DELAYS = [5_000, 15_000, 45_000]
+const RETRY_DELAYS = [5_000, 15_000, 45_000]
 
 // ponytail: recognises network errors and 5xx by gh's output; an unknown pattern aborts without retry.
 const UNREACHABLE =

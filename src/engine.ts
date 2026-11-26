@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Agent, Block, SessionResult } from './agent.ts'
+import { type Choice, integrationBranch } from './choice.ts'
 import type { Clock } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
 import { commonDir, git } from './git.ts'
@@ -8,17 +9,7 @@ import type { Sandbox } from './sandbox.ts'
 import { failedComment, resumeInfo, summary } from './summary.ts'
 import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
 
-export interface Choice {
-  targetBranch: string
-  finish: 'merge' | 'pr' | 'none'
-}
-
-/** The name of each finish, as menu and display show it. */
-export const FINISH: Record<Choice['finish'], string> = {
-  merge: 'Merge',
-  pr: 'PR',
-  none: 'None',
-}
+export { type Choice, FINISH, integrationBranch } from './choice.ts'
 
 export interface RunInput {
   spec: number
@@ -87,7 +78,7 @@ type TicketEvent = { ticket: number } & (
 )
 
 /** A command of the project config and its output, filtered. */
-export interface CommandOutput {
+interface CommandOutput {
   command: string
   output: string
 }
@@ -97,7 +88,7 @@ export interface GraphTicket extends Ticket {
   state: FrontierState
 }
 
-export interface VerificationResult {
+interface VerificationResult {
   name: string
   ok: boolean
 }
@@ -135,11 +126,6 @@ const CHECKS_TIME_LIMIT = 15 * MINUTE
 const SETUP_TIME_LIMIT = 15 * MINUTE
 /** After the usage limit reset: `resetsAt` is rounded to seconds, the server clock may differ. */
 const RESET_BUFFER = MINUTE
-
-/** The integration branch of a spec. */
-export function integrationBranch(spec: number): string {
-  return `spec/${spec}`
-}
 
 export function ticketBranchOf(ticket: number): string {
   return `ticket/${ticket}`

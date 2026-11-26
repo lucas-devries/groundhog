@@ -21,6 +21,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run fallow -- dead-code
       - name: Publish unless this version is already on npm
         run: |
           v=$(node -p 'require("./package.json").version')

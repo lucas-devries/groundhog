@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import type { Block } from './agent.ts'
-import { type Event, FINISH, integrationBranch } from './engine.ts'
+import { FINISH, integrationBranch } from './choice.ts'
+import type { Event } from './engine.ts'
 import type { Ticket } from './tracker.ts'
 
 /** The summary of a run as Markdown, from the engine's events alone. */

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Rudimentary checks before every commit, for humans and agents alike, so that no commit relies on
+# someone having run them. groundhog's engine commits without hooks (see src/git.ts).
+set -e
+# Git hands its hooks GIT_INDEX_FILE and the like; the tests run git in throwaway repos and must
+# not inherit them, or they work on this repo's index.
+unset $(git rev-parse --local-env-vars)
+npm run --silent typecheck
+npm run --silent lint
+npm test --silent
+npm run --silent fallow -- dead-code

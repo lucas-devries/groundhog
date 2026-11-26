@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type Config, DEFAULT_ATTEMPTS, FILE, readConfig } from './config.ts'
-import { git } from './git.ts'
+import { git, gitWithHooks } from './git.ts'
 import { FIXED_HOSTS } from './sandbox.ts'
 import type { CtrlC } from './start.ts'
 
@@ -179,7 +179,8 @@ export async function init({
   try {
     git(directory, 'add', '--', FILE)
     // With a path, `commit` takes only this file and leaves everything else staged.
-    git(directory, 'commit', '-m', 'Configure groundhog', '--', FILE)
+    // The human's own commit, so their hooks run, as they would on the command line.
+    gitWithHooks(directory, 'commit', '-m', 'Configure groundhog', '--', FILE)
   } catch (error) {
     // Git reports some refusals on stdout, not on stderr. `join` drops a missing stream.
     const { stdout, stderr } = error as { stdout?: string; stderr?: string }

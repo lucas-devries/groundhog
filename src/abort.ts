@@ -2,7 +2,7 @@ import type { Clock } from './clock.ts'
 
 /** Grace period for the second Ctrl+C. */
 const GRACE = 5_000
-export const NOTE = 'Press Ctrl+C again to abort'
+const NOTE = 'Press Ctrl+C again to abort'
 
 /**
  * Decides on the process's signals: the first Ctrl+C only shows the note, only a second one
