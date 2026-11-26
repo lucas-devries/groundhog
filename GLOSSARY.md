@@ -14,6 +14,10 @@ _Avoid_: Orchestrator, Loop, Agent
 The description of an undertaking that a set of tickets belongs to. The unit of work of a run.
 _Avoid_: PRD, Plan, Feature
 
+**Ready spec**:
+An open spec with at least one ticket released for the agent, so that a run over it would have something to do.
+_Avoid_: Open spec, active spec
+
 **Ticket**:
 A fully specified, vertical slice of a spec that can be implemented without asking back.
 _Avoid_: Issue, Task, Story
