@@ -1,0 +1,62 @@
+{
+  "data": {
+    "repository": {
+      "issues": {
+        "nodes": [
+          {
+            "number": 50,
+            "title": "Work through a batch of specs in one start",
+            "subIssues": { "totalCount": 2 }
+          },
+          {
+            "number": 51,
+            "title": "Offer to commit the project config at the end of init",
+            "subIssues": { "totalCount": 2 }
+          },
+          {
+            "number": 53,
+            "title": "Run a batch of specs, chosen or named",
+            "subIssues": { "totalCount": 0 }
+          },
+          {
+            "number": 54,
+            "title": "Commit the project config on Yes at the end of init",
+            "subIssues": { "totalCount": 0 }
+          },
+          {
+            "number": 55,
+            "title": "Handle the unchanged, failing and aborted commit cases in init",
+            "subIssues": { "totalCount": 0 }
+          },
+          {
+            "number": 56,
+            "title": "Every run in its own worktree",
+            "subIssues": { "totalCount": 6 }
+          },
+          { "number": 57, "title": "Run in its own worktree", "subIssues": { "totalCount": 0 } },
+          {
+            "number": 58,
+            "title": "Remove the worktree once the spec is done",
+            "subIssues": { "totalCount": 0 }
+          },
+          { "number": 59, "title": "Recover a broken worktree", "subIssues": { "totalCount": 0 } },
+          {
+            "number": 60,
+            "title": "Abort the start when a spec branch is checked out elsewhere",
+            "subIssues": { "totalCount": 0 }
+          },
+          {
+            "number": 61,
+            "title": "Setup commands for a fresh worktree",
+            "subIssues": { "totalCount": 0 }
+          },
+          {
+            "number": 62,
+            "title": "Resume line points into the worktree",
+            "subIssues": { "totalCount": 0 }
+          }
+        ]
+      }
+    }
+  }
+}

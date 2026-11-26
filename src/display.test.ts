@@ -182,6 +182,13 @@ const started = (finish: 'merge' | 'pr' | 'none'): Event => ({
   versions: {},
   time: 0,
 })
+test.each([
+  { total: 3, header: 'groundhog · Spec #25 (2/3) · target branch main · finish PR' },
+  { total: 1, header: 'groundhog · Spec #25 · target branch main · finish PR' },
+])('in a batch of $total the header reads "$header"', ({ total, header }) => {
+  expect(text([started('pr')], { position: { index: Math.min(2, total), total } })).toBe(header)
+})
+
 const finished = (finish: FinishResult): Event => ({
   type: 'run-finished',
   finish,

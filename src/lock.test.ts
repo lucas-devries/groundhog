@@ -64,3 +64,31 @@ test('in a worktree the lock lives in the shared .git of the clone', () => {
   expect(takeLock(tree, 25, 1_000).ok).toBe(true)
   expect(takeLock(clone, 26, 1_000).ok).toBe(false)
 })
+
+test('a lock taken without a spec holds PID and start time only and disappears on release', () => {
+  const { clone } = throwawayRepo()
+
+  const lock = takeLock(clone, undefined, 1_000)
+
+  expect(JSON.parse(readFileSync(file(clone), 'utf8'))).toEqual({ pid: process.pid, start: 1_000 })
+  if (lock.ok) lock.release()
+  expect(existsSync(file(clone))).toBe(false)
+})
+
+test('a living lock without a spec number aborts with the PID only', () => {
+  const { clone } = throwawayRepo()
+  writeFileSync(file(clone), JSON.stringify({ pid: process.ppid, start: 5 }))
+
+  expect(takeLock(clone, 25, 1_000)).toEqual({
+    ok: false,
+    message: `A run is already in progress in this clone (PID ${process.ppid}).`,
+  })
+})
+
+test('a dead lock without a spec number is taken over', () => {
+  const { clone } = throwawayRepo()
+  writeFileSync(file(clone), JSON.stringify({ pid: deadPid(), start: 5 }))
+
+  expect(takeLock(clone, undefined, 1_000).ok).toBe(true)
+  expect(JSON.parse(readFileSync(file(clone), 'utf8')).pid).toBe(process.pid)
+})

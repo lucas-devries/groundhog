@@ -4,7 +4,7 @@ import type { Event } from './engine.ts'
  * Reports the run to Herdr (herdr.dev) as agent `groundhog`, so the pane shows up in its agent
  * list. Returns for each event the arguments for the `herdr` CLI, or nothing; `release` gives
  * the arguments that free the pane again at the end of the process, or nothing if groundhog
- * never reported. One object per run, fed with all events in order.
+ * never reported. One object per process, fed with all events of its runs in order.
  */
 export function herdrAgent(env: { HERDR_ENV?: string; HERDR_PANE_ID?: string }): {
   report: (e: Event) => string[] | undefined

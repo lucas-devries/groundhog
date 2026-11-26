@@ -35,6 +35,15 @@ const START_CHECK = `query($owner: String!, $repo: String!, $spec: Int!) {
   }
 }`
 
+// shortcut: at most 100 open issues, no pagination.
+const OPEN_ISSUES = `query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}) {
+      nodes { number title subIssues { totalCount } }
+    }
+  }
+}`
+
 interface Nodes<T> {
   nodes: T[]
 }
@@ -47,12 +56,25 @@ interface IssueNode {
   blockedBy: Nodes<{ number: number; state: 'OPEN' | 'CLOSED' }>
 }
 
+interface OpenIssueNode {
+  number: number
+  title: string
+  subIssues: { totalCount: number }
+}
+
 export interface StartCheck {
   /** Labels out of `ready-for-agent` and `ready-for-human` that are missing in the repo. */
   missingLabels: string[]
   subIssues: number
   /** `https://github.com/<owner>/<repo>` */
   url: string
+}
+
+export interface OpenIssue {
+  number: number
+  title: string
+  /** Number of native sub-issues; a spec has at least one. */
+  subIssues: number
 }
 
 export interface Connection {
@@ -95,6 +117,16 @@ export class GitHubTracker implements Tracker {
       subIssues: r.issue.subIssues.totalCount,
       url: r.url,
     }
+  }
+
+  async openIssues(): Promise<OpenIssue[]> {
+    const { repository } = (await this.#graphql(OPEN_ISSUES)).data
+    const { nodes }: Nodes<OpenIssueNode> = repository.issues
+    return nodes.map(({ number, title, subIssues }) => ({
+      number,
+      title,
+      subIssues: subIssues.totalCount,
+    }))
   }
 
   async claim(ticket: number) {
@@ -146,9 +178,10 @@ export class GitHubTracker implements Tracker {
     return (await this.#gh([...args, '--body-file', '-'], body)).trim()
   }
 
-  async #graphql(query: string, spec: number) {
+  async #graphql(query: string, spec?: number) {
     const args = ['api', 'graphql', '-F', 'owner={owner}', '-F', 'repo={repo}']
-    return JSON.parse(await this.#gh([...args, '-F', `spec=${spec}`, '-f', `query=${query}`]))
+    if (spec !== undefined) args.push('-F', `spec=${spec}`)
+    return JSON.parse(await this.#gh([...args, '-f', `query=${query}`]))
   }
 
   #gh(args: string[], input?: string) {

@@ -197,3 +197,18 @@ test('gh runs in its own process group, so the first Ctrl+C does not end it', as
 
   expect(tracker.user).not.toBe(ownProcessGroup())
 })
+
+test('the open issues come with title and number of sub-issues, from one GraphQL query', async () => {
+  const { tracker, calls } = await connected([recording('open-issues.json')])
+
+  const issues = await tracker.openIssues()
+
+  expect(issues).toHaveLength(12)
+  expect(issues.slice(1, 3)).toEqual([
+    { number: 51, title: 'Offer to commit the project config at the end of init', subIssues: 2 },
+    { number: 53, title: 'Run a batch of specs, chosen or named', subIssues: 0 },
+  ])
+  const [call, ...more] = calls()
+  expect(more).toEqual([])
+  expect(call?.slice(0, 2)).toEqual(['api', 'graphql'])
+})

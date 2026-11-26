@@ -19,8 +19,10 @@ import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
 
 const CANCEL = Symbol('Ctrl+C')
 
+type Answer = string | string[] | boolean | symbol
+
 /** Scripted dialog: answers the questions in order and records everything shown. */
-function fakeDialog(answers: (string | boolean | symbol)[]) {
+function fakeDialog(answers: Answer[]) {
   const shown: Record<string, unknown>[] = []
   const answer = async (question: Record<string, unknown>) => {
     shown.push(question)
@@ -32,6 +34,7 @@ function fakeDialog(answers: (string | boolean | symbol)[]) {
     warn: (text: string) => shown.push({ kind: 'warn', text }),
     outro: (text: string) => shown.push({ kind: 'outro', text }),
     select: (o: object) => answer({ kind: 'select', ...o }),
+    multiselect: (o: object) => answer({ kind: 'multiselect', ...o }),
     confirm: (o: object) => answer({ kind: 'confirm', ...o }),
   } as MenuDialog
   return { dialog, shown }
@@ -88,14 +91,14 @@ const lock = (clone: string) => join(clone, '.git', 'groundhog.lock')
 /** Starts with the `PATH` from `ready`; the test itself calls the real `git` again afterwards. */
 async function run(
   { clone, path }: { clone: string; path: string },
-  answers: (string | boolean | symbol)[],
+  answers: Answer[],
   options: Partial<StartOptions> = {},
 ) {
   const { dialog, shown } = fakeDialog(answers)
   vi.stubEnv('PATH', path)
   const result: Start = await start({
     directory: clone,
-    spec: 25,
+    specs: [25],
     dialog,
     isTerminal: true,
     sandboxMissing: () => [],
@@ -631,4 +634,285 @@ test('Ctrl+C at the question about the installation aborts with 130', async () =
   const { result } = await run({ clone, path }, [CANCEL])
 
   expect(result).toMatchObject({ ok: false, exitCode: 130 })
+})
+
+/** The open issues of the repo, each with number, title and number of sub-issues. */
+const openIssues = (...issues: [number, string, number][]): GhAnswer => ({
+  output: JSON.stringify({
+    data: {
+      repository: {
+        issues: {
+          nodes: issues.map(([number, title, totalCount]) => ({
+            number,
+            title,
+            subIssues: { totalCount },
+          })),
+        },
+      },
+    },
+  }),
+})
+
+interface SubIssue {
+  closed?: boolean
+  labels?: string[]
+  assignees?: string[]
+  blocked?: boolean
+}
+
+/** A task-graph; without further words a ticket is open, released and free. */
+const taskGraph = (...tickets: SubIssue[]): GhAnswer => ({
+  output: JSON.stringify({
+    data: {
+      repository: {
+        issue: {
+          subIssues: {
+            nodes: tickets.map((t, i) => ({
+              number: 100 + i,
+              state: t.closed ? 'CLOSED' : 'OPEN',
+              labels: { nodes: (t.labels ?? ['ready-for-agent']).map((name) => ({ name })) },
+              assignees: { nodes: (t.assignees ?? []).map((login) => ({ login })) },
+              blockedBy: { nodes: t.blocked ? [{ number: 1, state: 'OPEN' }] : [] },
+            })),
+          },
+        },
+      },
+    },
+  }),
+})
+
+const START_CHECK = recording('start-check-spec-25.json')
+const BEFORE_SELECTION = [GH_VERSION, TOKEN, USER]
+
+/** Two ready specs, #25 and #57, and the answers for a batch of both. */
+const TWO_READY = [
+  ...BEFORE_SELECTION,
+  openIssues([57, 'Newer', 1], [30, 'A ticket', 0], [25, 'Older', 3]),
+  taskGraph({}, { blocked: true }, { closed: true }),
+  taskGraph({ assignees: ['someone'] }, { blocked: true }),
+]
+const NOTES = [taskGraph({}, { labels: ['ready-for-human'] }), taskGraph({})]
+
+test('without specs the selection offers the ready specs, oldest first and all preselected', async () => {
+  const { clone, path } = ready({ gh: [...TWO_READY, START_CHECK, START_CHECK, ...NOTES] })
+
+  const { result, shown } = await run({ clone, path }, [['57', '25'], 'develop', 'pr'], {
+    specs: [],
+  })
+
+  expect(shown[0]).toEqual({
+    kind: 'multiselect',
+    message: 'Which specs should run?',
+    options: [
+      { value: '25', label: '#25 Older', hint: '3 tickets, 2 of them released for the agent' },
+      { value: '57', label: '#57 Newer', hint: '2 tickets, 2 of them released for the agent' },
+    ],
+    initialValues: ['25', '57'],
+    required: true,
+  })
+  expect(shown.slice(1).map((s) => s.title ?? s.kind)).toEqual([
+    'This run',
+    'This run',
+    'select',
+    'select',
+    'outro',
+  ])
+  expect(shown[1]?.text).toContain(
+    'Spec #25\n2 tickets, 1 of them released for the agent\n#101: ready-for-human, will not be touched',
+  )
+  expect(shown[2]?.text).toContain('Spec #57\n1 tickets, 1 of them released for the agent')
+  expect(shown[4]).toMatchObject({
+    message: 'Finish: what happens to spec/25, spec/57 once all tickets are closed?',
+    options: [
+      { hint: 'groundhog merges into develop and pushes' },
+      { hint: 'groundhog opens a PR into develop' },
+      { hint: 'spec/25, spec/57 stay' },
+    ],
+  })
+  // The order of the list counts, not the order of the ticks.
+  expect(result).toMatchObject({
+    ok: true,
+    specs: [25, 57],
+    choice: { targetBranch: 'develop', finish: 'pr' },
+  })
+  if (!result.ok) return
+  expect(result.log.path).toMatch(/-spec-25$/)
+  expect(JSON.parse(readFileSync(lock(clone), 'utf8'))).not.toHaveProperty('spec')
+  result.release()
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test.each<{ reason: string; tickets: SubIssue[]; listed: boolean }>([
+  { reason: 'only blocked tickets', tickets: [{ blocked: true }], listed: true },
+  {
+    reason: 'a ticket assigned to the own user',
+    tickets: [{ assignees: ['lucas'] }],
+    listed: true,
+  },
+  {
+    reason: 'only taken, closed, ready-for-human and unreleased tickets',
+    tickets: [
+      { assignees: ['someone'] },
+      { closed: true },
+      { labels: ['ready-for-human'] },
+      { labels: [] },
+    ],
+    listed: false,
+  },
+])('a spec with $reason is ready: $listed', async ({ tickets, listed }) => {
+  // #25 is always ready, so the selection appears even if #57 is left out.
+  const { clone, path } = ready({
+    gh: [
+      ...BEFORE_SELECTION,
+      openIssues([25, 'Older', 1], [57, 'Newer', tickets.length]),
+      taskGraph({}),
+      taskGraph(...tickets),
+    ],
+  })
+
+  const { shown } = await run({ clone, path }, [CANCEL], { specs: [] })
+
+  const options = shown[0]?.options as { value: string }[]
+  expect(options.map((o) => o.value)).toEqual(listed ? ['25', '57'] : ['25'])
+})
+
+test('Ctrl+C in the selection aborts with 130 and releases the lock; one ready spec is asked too', async () => {
+  const { clone, fake, path } = ready({
+    gh: [...BEFORE_SELECTION, openIssues([25, 'Only', 1]), taskGraph({})],
+  })
+
+  const { result, shown } = await run({ clone, path }, [CANCEL], { specs: [] })
+
+  expect(shown).toMatchObject([{ kind: 'multiselect', initialValues: ['25'] }])
+  expect(result).toEqual({ ok: false, exitCode: 130, message: 'Aborted. Nothing was changed.' })
+  expect(existsSync(lock(clone))).toBe(false)
+  expect(fake.calls()).toHaveLength(5)
+})
+
+test('without a ready spec the start ends with exit code 0 and releases the lock', async () => {
+  const { clone, path } = ready({
+    gh: [
+      ...BEFORE_SELECTION,
+      openIssues([25, 'Done', 1], [30, 'A ticket', 0]),
+      taskGraph({ closed: true }),
+    ],
+  })
+
+  const { result, shown } = await run({ clone, path }, [], { specs: [] })
+
+  expect(shown).toEqual([])
+  expect(result).toEqual({
+    ok: false,
+    exitCode: 0,
+    message: 'No spec is ready: no open issue has sub-issues released for the agent.',
+  })
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test('without specs and without a terminal the start aborts at once, without gh or claude', async () => {
+  const { clone, fake, claude, path } = ready()
+
+  const { result, shown } = await run({ clone, path }, [], { specs: [], isTerminal: false })
+
+  expect(result).toEqual({
+    ok: false,
+    exitCode: 1,
+    message: 'groundhog needs a spec number or a terminal. See groundhog --help.',
+  })
+  expect(shown).toEqual([])
+  expect(fake.calls()).toEqual([])
+  expect(claude?.calls()).toEqual([])
+})
+
+test.each([
+  {
+    reason: 'the working tree is dirty',
+    prepare: (clone: string) => writeFileSync(join(clone, 'new.txt'), 'x'),
+    message: 'working tree is not clean',
+  },
+  {
+    reason: 'a run holds the lock without a spec number',
+    prepare: (clone: string) =>
+      writeFileSync(lock(clone), JSON.stringify({ pid: process.ppid, start: 1 })),
+    message: `A run is already in progress in this clone (PID ${process.ppid}).`,
+  },
+])('without specs the start aborts before the selection if $reason', async (c) => {
+  const { clone, fake, path } = ready()
+  c.prepare(clone)
+
+  const { result, shown } = await run({ clone, path }, [], { specs: [] })
+
+  expect(result).toMatchObject({
+    ok: false,
+    exitCode: 1,
+    message: expect.stringContaining(c.message),
+  })
+  expect(shown).toEqual([])
+  expect(fake.calls().map((a) => a.args[1])).not.toContain('graphql')
+})
+
+test('a spec named twice aborts the start', async () => {
+  const { clone, path } = ready()
+
+  const { result } = await run({ clone, path }, [], { specs: [57, 58, 57] })
+
+  expect(result).toEqual({ ok: false, exitCode: 1, message: 'Spec #57 is named twice.' })
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test('several specs run in the order given; target branch and finish are asked once', async () => {
+  const { clone, path } = ready({
+    gh: [...BEFORE_SELECTION, START_CHECK, START_CHECK, ...NOTES],
+  })
+
+  const { result, shown } = await run({ clone, path }, ['main', 'merge', true], {
+    specs: [57, 25],
+  })
+
+  expect(shown.map((s) => s.title ?? s.kind)).toEqual([
+    'This run',
+    'This run',
+    'select',
+    'select',
+    'warn',
+    'confirm',
+    'outro',
+  ])
+  expect(shown[0]?.text).toContain('Spec #57')
+  expect(shown[4]?.text).toContain('merges spec/57, spec/25 into main')
+  expect(result).toMatchObject({ ok: true, specs: [57, 25] })
+  expect(JSON.parse(readFileSync(lock(clone), 'utf8'))).not.toHaveProperty('spec')
+})
+
+test('a broken second spec aborts the start before anything runs', async () => {
+  const { clone, path } = ready({
+    gh: [...BEFORE_SELECTION, START_CHECK, withoutSubIssues],
+  })
+
+  const { result, shown } = await run({ clone, path }, [], { specs: [25, 57] })
+
+  expect(result).toMatchObject({
+    ok: false,
+    exitCode: 1,
+    message: expect.stringContaining('Spec #57 has no sub-issues'),
+  })
+  expect(shown).toEqual([])
+  expect(existsSync(join(clone, '.git/groundhog'))).toBe(false)
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test('after the update the message names every spec of the batch in order', async () => {
+  const { clone, path } = ready({
+    gh: [...BEFORE_SELECTION, START_CHECK, START_CHECK, START_CHECK],
+  })
+
+  const { result, shown } = await run({ clone, path }, [true], {
+    specs: [57, 58, 61],
+    update: { newerVersion: () => '0.2.0', install: vi.fn() },
+  })
+
+  expect(shown).toEqual([UPDATE_QUESTION])
+  expect(result).toMatchObject({
+    message: 'groundhog 0.2.0 is installed. Start again: groundhog 57 58 61',
+  })
 })

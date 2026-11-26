@@ -12,6 +12,14 @@ export interface DisplayOptions {
   width?: number
   /** Folder of the log; the last line names the summary in it. */
   logDir?: string
+  /** Where the run stands in its batch; the header shows it in a batch of more than one. */
+  position?: Position
+}
+
+/** The place of a run in its batch, counted from 1. */
+export interface Position {
+  index: number
+  total: number
 }
 
 /**
@@ -54,9 +62,11 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
         integration = integrationBranch(e.spec)
         const version = e.versions.groundhog ? ` ${e.versions.groundhog}` : ''
         const finish = FINISH[e.choice.finish]
+        const { position } = options
+        const place = position && position.total > 1 ? ` (${position.index}/${position.total})` : ''
         return [
           s.dim(
-            `groundhog${version} · Spec #${e.spec} · target branch ${e.choice.targetBranch} · finish ${finish}`,
+            `groundhog${version} · Spec #${e.spec}${place} · target branch ${e.choice.targetBranch} · finish ${finish}`,
           ),
         ]
       }

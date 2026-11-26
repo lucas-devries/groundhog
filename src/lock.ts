@@ -6,9 +6,10 @@ export type Lock = { ok: true; release: () => void } | { ok: false; message: str
 
 /**
  * Takes the clone's lock `.git/groundhog.lock` (in the shared `.git` for worktrees). A lock with
- * a dead PID is taken over, one with a living PID aborts.
+ * a dead PID is taken over, one with a living PID aborts. `spec` is `undefined` while the lock
+ * does not belong to exactly one spec: before the selection, and for a batch of several specs.
  */
-export function takeLock(directory: string, spec: number, start: number): Lock {
+export function takeLock(directory: string, spec: number | undefined, start: number): Lock {
   const gitDir = resolve(directory, git(directory, 'rev-parse', '--git-common-dir'))
   const file = join(gitDir, 'groundhog.lock')
   const content = JSON.stringify({ pid: process.pid, start, spec })
@@ -22,9 +23,10 @@ export function takeLock(directory: string, spec: number, start: number): Lock {
     }
     const old = read(file)
     if (old && alive(old.pid)) {
+      const run = old.spec === undefined ? 'A run' : `A run on spec #${old.spec}`
       return {
         ok: false,
-        message: `A run on spec #${old.spec} is already in progress in this clone (PID ${old.pid}).`,
+        message: `${run} is already in progress in this clone (PID ${old.pid}).`,
       }
     }
     rmSync(file, { force: true })
@@ -37,7 +39,7 @@ export function takeLock(directory: string, spec: number, start: number): Lock {
   }
 }
 
-function read(file: string): { pid: number; spec: number } | undefined {
+function read(file: string): { pid: number; spec?: number } | undefined {
   try {
     const { pid, spec } = JSON.parse(readFileSync(file, 'utf8'))
     return Number.isInteger(pid) && pid > 0 ? { pid, spec } : undefined

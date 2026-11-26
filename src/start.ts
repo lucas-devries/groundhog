@@ -7,7 +7,7 @@ import { GitHubTracker } from './github.ts'
 import { takeLock } from './lock.ts'
 import { type Log, openLog } from './log.ts'
 import { type SrtSandbox, sandboxMissing, srtSandbox } from './sandbox.ts'
-import { frontierState, type Ticket } from './tracker.ts'
+import { frontierState, isReady, type Ticket } from './tracker.ts'
 
 /** The answer of `@clack/prompts` to Ctrl+C. */
 export type CtrlC = symbol
@@ -22,6 +22,12 @@ export interface MenuDialog {
     options: { value: string; label: string; hint?: string }[]
     initialValue: string
   }): Promise<string | CtrlC>
+  multiselect(o: {
+    message: string
+    options: { value: string; label: string; hint?: string }[]
+    initialValues: string[]
+    required: boolean
+  }): Promise<string[] | CtrlC>
   confirm(o: {
     message: string
     initialValue: boolean
@@ -33,7 +39,8 @@ export interface MenuDialog {
 export interface StartOptions {
   /** A directory in the clone. */
   directory: string
-  spec: number
+  /** The batch in the order named; empty means the human chooses it in the selection. */
+  specs: number[]
   dialog: MenuDialog
   /** stdin is a terminal. */
   isTerminal: boolean
@@ -50,12 +57,15 @@ export interface StartOptions {
   next?: (event: Event) => void
 }
 
-/** Everything the run needs after the menu. */
+/** Everything the runs of the batch need after the menu. */
 export interface Ready {
   ok: true
   /** Repo root of the clone. */
   directory: string
   config: Config
+  /** The batch in the order it runs. */
+  specs: number[]
+  /** Target branch and finish, the same for every run of the batch. */
   choice: Choice
   tracker: GitHubTracker
   /** The `gh` token. */
@@ -64,6 +74,7 @@ export interface Ready {
   /** The `srt` sandbox; `undefined` only with `sandbox.off`. */
   sandbox: SrtSandbox | undefined
   versions: Record<string, string>
+  /** The log of the first run; every later run opens its own. */
   log: Log
   /** Releases the lock; call on every end. */
   release: () => void
@@ -72,6 +83,8 @@ export interface Ready {
 export type Start = Ready | { ok: false; exitCode: number; message: string }
 
 const NOTHING_CHANGED = 'Aborted. Nothing was changed.'
+const NO_TERMINAL = 'groundhog needs a spec number or a terminal. See groundhog --help.'
+const NO_READY_SPEC = 'No spec is ready: no open issue has sub-issues released for the agent.'
 
 class Abort extends Error {
   constructor(
@@ -83,12 +96,12 @@ class Abort extends Error {
 }
 
 /**
- * Start of a run up to the end of the menu: start checks, lock, log, menu. Changes neither repo
- * nor tracker; on every abort the lock is free again.
+ * Start of a batch up to the end of the menu: start checks, lock, selection, log, menu. Changes
+ * neither repo nor tracker; on every abort the lock is free again.
  */
 export async function start({
   directory: called,
-  spec,
+  specs: named,
   dialog,
   isTerminal,
   sandboxMissing: missing = sandboxMissing,
@@ -97,6 +110,9 @@ export async function start({
 }: StartOptions): Promise<Start> {
   let release = () => {}
   try {
+    const twice = named.find((spec, i) => named.indexOf(spec) !== i)
+    if (twice !== undefined) throw new Abort(`Spec #${twice} is named twice.`)
+    if (named.length === 0 && !isTerminal) throw new Abort(NO_TERMINAL)
     const versions: Record<string, string> = {}
     tool(called, 'git', ['--version'])
     let directory: string
@@ -124,7 +140,7 @@ export async function start({
     if (!read.ok) throw new Abort(read.errors.join('\n'))
     const config = read.config
 
-    const lock = takeLock(directory, spec, Date.now())
+    const lock = takeLock(directory, named.length === 1 ? named[0] : undefined, Date.now())
     if (!lock.ok) throw new Abort(lock.message)
     release = lock.release
 
@@ -171,20 +187,6 @@ export async function start({
     }
 
     const tracker = await GitHubTracker.connect({ directory })
-    const check = await tracker.startCheck(spec)
-    if (check.missingLabels.length > 0) {
-      throw new Abort(
-        `The repo is missing the label ${check.missingLabels.join(' and ')}. Create it on GitHub.`,
-      )
-    }
-    if (check.subIssues === 0) {
-      throw new Abort(
-        `Spec #${spec} has no sub-issues. groundhog only takes native sub-issues as tickets; ` +
-          '"Part of #n" in the text does not count. Link the tickets in the spec on GitHub under ' +
-          '"Sub-issues" (Add existing issue).',
-      )
-    }
-
     let sandbox: SrtSandbox | undefined
     if (!config.sandbox.off) {
       const what = missing()
@@ -226,11 +228,15 @@ export async function start({
       }
     }
 
+    const specs = named.length > 0 ? named : await selection(dialog, tracker)
+    let repoUrl = ''
+    for (const spec of specs) repoUrl = await startCheck(tracker, spec)
+
     if (!isTerminal) throw new Abort('groundhog needs a terminal on stdin for the menu.')
 
     let log: Log
     try {
-      log = openLog({ directory, spec, start: Date.now(), next })
+      log = openLog({ directory, spec: specs[0] as number, start: Date.now(), next })
     } catch (error) {
       throw new Abort(`The log folder cannot be created: ${(error as Error).message}`)
     }
@@ -246,19 +252,23 @@ export async function start({
       if (typeof yes === 'symbol') throw new Abort(NOTHING_CHANGED, 130)
       if (yes) {
         update?.install(tag)
-        throw new Abort(`groundhog ${tag} is installed. Start again: groundhog ${spec}`, 0)
+        throw new Abort(
+          `groundhog ${tag} is installed. Start again: groundhog ${specs.join(' ')}`,
+          0,
+        )
       }
     }
 
-    const choice = await menu(dialog, spec, config, await tracker.taskGraph(spec), tracker.user)
+    const choice = await menu(dialog, specs, config, tracker)
     return {
       ok: true,
       directory,
       config,
+      specs,
       choice,
       tracker,
       token,
-      repoUrl: check.url,
+      repoUrl,
       sandbox,
       versions,
       log,
@@ -326,30 +336,81 @@ function skills(directory: string, versions: Record<string, string>): string[] {
   return SKILLS.filter((s) => !init.skills?.includes(s))
 }
 
+/** The human chooses the batch from the ready specs, which run oldest first. */
+async function selection(dialog: MenuDialog, tracker: GitHubTracker): Promise<number[]> {
+  const issues = (await tracker.openIssues())
+    .filter((i) => i.subIssues > 0)
+    .sort((a, b) => a.number - b.number)
+  const options: { value: string; label: string; hint: string }[] = []
+  for (const { number, title } of issues) {
+    const tickets = await tracker.taskGraph(number)
+    if (!isReady(tickets, tracker.user)) continue
+    const hint = describeTickets(tickets, tracker.user)
+    options.push({ value: String(number), label: `#${number} ${title}`, hint })
+  }
+  if (options.length === 0) throw new Abort(NO_READY_SPEC, 0)
+  const chosen = answer(
+    await dialog.multiselect({
+      message: 'Which specs should run?',
+      options,
+      initialValues: options.map((o) => o.value),
+      required: true,
+    }),
+  )
+  // The answer has the order of the ticks; the batch runs in the order of the list.
+  return chosen.map(Number).sort((a, b) => a - b)
+}
+
+/** Checks the labels and the sub-issues of a spec; returns the repo URL. */
+async function startCheck(tracker: GitHubTracker, spec: number): Promise<string> {
+  const check = await tracker.startCheck(spec)
+  if (check.missingLabels.length > 0) {
+    throw new Abort(
+      `The repo is missing the label ${check.missingLabels.join(' and ')}. Create it on GitHub.`,
+    )
+  }
+  if (check.subIssues === 0) {
+    throw new Abort(
+      `Spec #${spec} has no sub-issues. groundhog only takes native sub-issues as tickets; ` +
+        '"Part of #n" in the text does not count. Link the tickets in the spec on GitHub under ' +
+        '"Sub-issues" (Add existing issue).',
+    )
+  }
+  return check.url
+}
+
+/** The size of a run, as the selection and the "This run" note show it. */
+function describeTickets(tickets: Ticket[], user: string): string {
+  // Released, even if still blocked or taken.
+  const released = tickets.filter((t) =>
+    ['workable', 'blocked', 'taken'].includes(frontierState(t, user)),
+  )
+  return `${tickets.length} tickets, ${released.length} of them released for the agent`
+}
+
 async function menu(
   dialog: MenuDialog,
-  spec: number,
+  specs: number[],
   config: Config,
-  tickets: Ticket[],
-  user: string,
+  tracker: GitHubTracker,
 ): Promise<Choice> {
-  const integration = integrationBranch(spec)
-  const state = (t: Ticket) => frontierState(t, user)
-  const human = tickets.filter((t) => state(t) === 'ready-for-human')
-  // Released, even if still blocked or taken.
-  const released = tickets.filter((t) => ['workable', 'blocked', 'taken'].includes(state(t)))
+  const integration = specs.map(integrationBranch).join(', ')
   const { sandbox } = config
-  dialog.note(
-    [
-      `Spec #${spec}`,
-      `${tickets.length} tickets, ${released.length} of them released for the agent`,
-      ...human.map((t) => `#${t.number}: ready-for-human, will not be touched`),
-      `Checks: ${config.checks.join(' · ')}`,
-      `Sandbox: ${sandbox.off ? 'off' : 'on (srt)'}`,
-      `Attempts per ticket: ${config.attempts}`,
-    ].join('\n'),
-    'This run',
-  )
+  for (const spec of specs) {
+    const tickets = await tracker.taskGraph(spec)
+    const human = tickets.filter((t) => frontierState(t, tracker.user) === 'ready-for-human')
+    dialog.note(
+      [
+        `Spec #${spec}`,
+        describeTickets(tickets, tracker.user),
+        ...human.map((t) => `#${t.number}: ready-for-human, will not be touched`),
+        `Checks: ${config.checks.join(' · ')}`,
+        `Sandbox: ${sandbox.off ? 'off' : 'on (srt)'}`,
+        `Attempts per ticket: ${config.attempts}`,
+      ].join('\n'),
+      'This run',
+    )
+  }
   if (sandbox.off) {
     dialog.warn(
       'The sandbox is off: sessions run in auto mode without boundaries on this machine, with your gh token.',
@@ -372,7 +433,11 @@ async function menu(
           hint: `groundhog merges into ${targetBranch} and pushes`,
         },
         { value: 'pr', label: FINISH.pr, hint: `groundhog opens a PR into ${targetBranch}` },
-        { value: 'none', label: FINISH.none, hint: `${integration} stays` },
+        {
+          value: 'none',
+          label: FINISH.none,
+          hint: `${integration} ${specs.length > 1 ? 'stay' : 'stays'}`,
+        },
       ],
       initialValue: targetBranch === 'main' ? 'pr' : 'merge',
     }),
