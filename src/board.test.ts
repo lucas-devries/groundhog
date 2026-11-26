@@ -75,11 +75,12 @@ test('before the first ticket: header and the task-graph with the state from the
   ])
 })
 
-test('a ticket goes through its states; the transcript shows only the current session, then the verifications', () => {
+test('a ticket goes through its states; the transcripts of every session stay in order', () => {
   const run: Event[] = [started, graph(ticket(27), ticket(28))]
   const state = (...more: Event[]) => {
     run.push(...more)
-    return screen(run)
+    // Tall enough for every transcript line of this test.
+    return screen(run, 60, 16)
   }
   const attempt = (n: number): Event => ({
     type: 'attempt-started',
@@ -99,7 +100,7 @@ test('a ticket goes through its states; the transcript shows only the current se
   let s = state({ type: 'ticket-taken', ticket: 27, time: 0 }, attempt(1), assistant(27, 'one'))
   expect(s[2]).toBe('  #27 ▶ running · Attempt 1 of 3')
   expect(s[3]).toBe('  #28 · waiting')
-  expect(s.slice(5, 7)).toEqual(['  │ one', ''])
+  expect(s.slice(5, 8)).toEqual(['━━ #27 · Attempt 1 of 3', '  │ one', ''])
   expect(s.at(-1)).toBe('#27 · Attempt 1 of 3')
 
   s = state(
@@ -107,26 +108,44 @@ test('a ticket goes through its states; the transcript shows only the current se
     verification('new commit since fork point', false),
   )
   expect(s[2]).toBe('  #27 ↻ Attempt 1 of 3 failed')
-  expect(s.slice(5, 9)).toEqual([
+  expect(s.slice(6, 10)).toEqual([
     '  │ one',
     '  ✔ Session successful',
     '  ✘ new commit since fork point',
     '',
   ])
 
-  // The next attempt starts with an empty transcript.
+  // The next attempt follows below the previous one.
   s = state(attempt(2), assistant(27, 'two', 2))
   expect(s[2]).toBe('  #27 ▶ running · Attempt 2 of 3')
-  expect(s.slice(5, 7)).toEqual(['  │ two', ''])
+  expect(s.slice(9, 12)).toEqual(['━━ #27 · Attempt 2 of 3', '  │ two', ''])
   expect(s.at(-1)).toBe('#27 · Attempt 2 of 3')
 
   // Pause at the usage limit; the restart of the same attempt is a new session.
+  state({
+    type: 'session-finished',
+    ticket: 27,
+    session: 2,
+    attempt: 2,
+    success: false,
+    blocks: [{ tool: 'Bash', command: 'curl example.com', reason: 'refused' }],
+    time: 0,
+  })
   const reset = new Date(2026, 10, 25, 3, 10).getTime()
   s = state({ type: 'pause', ticket: 27, reset, time: reset - 60_000 })
   expect(s[2]).toBe('  #27 ⏸ Pause at usage limit until 03:10')
   s = state(assistant(27, 'three', 3))
   expect(s[2]).toBe('  #27 ▶ running · Attempt 2 of 3')
-  expect(s.slice(5, 7)).toEqual(['  │ three', ''])
+  expect(s.slice(6, 14)).toEqual([
+    '  │ one',
+    '  ✔ Session successful',
+    '  ✘ new commit since fork point',
+    '━━ #27 · Attempt 2 of 3',
+    '  │ two',
+    '  ⛔ Block: Bash curl example.com',
+    '  ⏸ Usage limit reached, pause until 03:10',
+    '  │ three',
+  ])
 
   s = state(
     { type: 'ticket-done', ticket: 27, commit: 'abc1234def', attempts: 2, time: 0 },
@@ -187,6 +206,19 @@ test('overlong lines are truncated, the transcript shows its end, the screen alw
 
   // A smaller window: nothing overflows, not even the task-graph.
   expect(b.screen(18, 3)).toEqual(['groundhog 1.2.3 ·…', '─'.repeat(18), '#27 · Attempt 1 o…'])
+})
+
+test('the board holds the last 10,000 transcript lines and drops older ones', () => {
+  const b = board()
+  b.report(started)
+  for (let i = 1; i <= 10_001; i++) b.report(assistant(27, `line ${i}`))
+  b.report({ type: 'verification', ticket: 27, name: 'Check: npm test', ok: true, time: 0 })
+
+  // A window taller than the limit shows everything the board holds.
+  const s = b.screen(60, 10_010)
+  expect(s).toContain('  │ line 3')
+  expect(s).not.toContain('  │ line 2')
+  expect(s.filter((l) => l.startsWith('  ')).length).toBe(10_000)
 })
 
 test('with colours, truncation is ANSI-safe', () => {

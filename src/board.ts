@@ -8,12 +8,12 @@ export interface BoardOptions {
   logDir?: string
 }
 
-/** How many transcript lines the board keeps at most; more fit in no window. */
-const TRANSCRIPT_MAX = 1000
+/** How many transcript lines the board keeps at most; the log keeps all of them. */
+const TRANSCRIPT_MAX = 10_000
 
 /**
- * The board: a fixed screen of header, task-graph, warnings, the transcript of the current
- * session and a footer. `report` takes every event of the run in order and returns the lines the
+ * The board: a fixed screen of header, task-graph, warnings, the transcripts of the run's
+ * sessions and a footer. `report` takes every event of the run in order and returns the lines the
  * continuous output would write for it (for the closing lines).
  */
 export function board(options: BoardOptions = {}) {
@@ -25,10 +25,13 @@ export function board(options: BoardOptions = {}) {
   /** State of the tickets this run has touched; the others show the tracker. */
   const state = new Map<number, string>()
   const warnings: string[] = []
-  let transcript: string[] = []
+  const transcript: string[] = []
   let footer = ''
   let attempt = ''
-  let session: number | undefined
+  const append = (added: string[]) => {
+    transcript.push(...added)
+    transcript.splice(0, transcript.length - TRANSCRIPT_MAX)
+  }
 
   const report = (e: Event): string[] => {
     const added = lines(e)
@@ -43,29 +46,24 @@ export function board(options: BoardOptions = {}) {
         attempt = `Attempt ${e.attempt} of ${e.of}`
         state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
         footer = `#${e.ticket} · ${attempt}`
-        transcript = []
+        append([s.bold(`━━ ${footer}`)])
         break
       case 'session-output':
-        // A new session, also the restart after a pause: only its transcript counts.
-        if (e.session !== session) {
-          session = e.session
-          transcript = []
-          state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
-        }
-        transcript.push(...added)
-        if (transcript.length > 2 * TRANSCRIPT_MAX) transcript = transcript.slice(-TRANSCRIPT_MAX)
+        // Also ends a pause: the attempt restarted in a new session.
+        state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
+        append(added)
         break
       case 'verification':
         if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${attempt} failed`))
-        transcript.push(...added)
+        append(added)
         break
       case 'pause':
         state.set(e.ticket, s.yellow(`⏸ Pause at usage limit until ${timeOfDay(e.reset, e.time)}`))
-        transcript.push(...added)
+        append(added)
         break
       case 'session-finished':
       case 'run-halted':
-        transcript.push(...added)
+        append(added)
         break
       case 'ticket-done':
         state.set(e.ticket, s.green(`✔ done in attempt ${e.attempts}`))
