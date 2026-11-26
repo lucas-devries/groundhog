@@ -1,6 +1,6 @@
 {
   "name": "groundhog-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hand over a spec, walk away: works through the tickets of a GitHub spec with Claude Code, verifies every result itself and lands one commit per ticket.",
   "keywords": [
     "claude-code",
