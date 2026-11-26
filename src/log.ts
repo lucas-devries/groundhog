@@ -58,16 +58,20 @@ export function openLog(options: {
       return
     }
     if (e.type === 'session-finished') lastSession = `ticket-${e.ticket}-session-${e.session}`
-    if (e.type === 'verification' && e.output !== undefined) {
+    if (e.type === 'verification' && e.command !== undefined && e.output !== undefined) {
       const { output, command, ...withoutOutput } = e
-      const text = `$ ${command}\n${output}${output.endsWith('\n') ? '' : '\n'}`
-      write(`${lastSession}-checks.log`, text, e.time)
+      write(`${lastSession}-checks.log`, asRun(command, output), e.time)
       e = withoutOutput
     }
     if (e.type === 'run-finished') {
       const { summary, ...withoutSummary } = e
       write('summary.md', `${summary}\n`, e.time)
       e = withoutSummary as Event
+    }
+    if (e.type === 'run-halted' && e.reason === 'setup') {
+      const { output, command, ...withoutOutput } = e
+      write('setup.log', asRun(command, output), e.time)
+      e = withoutOutput as Event
     }
     write('run.jsonl', `${JSON.stringify(e)}\n`, e.time)
   }
@@ -79,6 +83,11 @@ export function openLog(options: {
       next?.(e)
     },
   }
+}
+
+/** A command and its output, as in a terminal. */
+function asRun(command: string, output: string): string {
+  return `$ ${command}\n${output}${output.endsWith('\n') ? '' : '\n'}`
 }
 
 /** YYYYMMDD-HHMMSS in local time. */

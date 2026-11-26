@@ -631,3 +631,21 @@ test('in the terminal: without a terminal on stdin, stdin is not touched', () =>
   expect(written.join('')).not.toContain('?100')
   expect(input.listenerCount('data')).toBe(0)
 })
+
+test('in the terminal: a failing setup stays readable on the normal screen after the board closes', () => {
+  const { written, show } = terminal()
+  const board = show()
+
+  board.report({ type: 'run-halted', reason: 'setup', command: 'npm ci', output: 'E404', time: 0 })
+  board.report({
+    type: 'run-finished',
+    finish: { type: 'skipped', reason: 'setup failed' },
+    summary: '# Summary',
+    time: 0,
+  })
+
+  const normal = written.join('').split('\x1b[?1049l').at(-1)
+  expect(normal).toContain('Setup: npm ci')
+  expect(normal).toContain('│ E404')
+  expect(normal).toContain('# Summary')
+})

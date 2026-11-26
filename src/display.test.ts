@@ -175,6 +175,29 @@ test('state changes of the tickets, verifications, blocks and warnings appear as
   )
 })
 
+test('a failing setup shows its command and output like a red check, then the halt', () => {
+  expect(
+    text([
+      {
+        type: 'run-halted',
+        reason: 'setup',
+        command: 'npm ci',
+        output: 'npm error code E404\n  \x1b[31mat install\x1b[0m\r\n',
+        time: 0,
+      },
+      finished({ type: 'skipped', reason: 'setup failed' }),
+    ]).split('\n'),
+  ).toEqual(
+    expect.arrayContaining([
+      '  ✘ Setup: npm ci',
+      '  │ npm error code E404',
+      '  │   at install',
+      '■ Run halted: setup failed, no ticket was taken',
+      'Finish  skipped because setup failed. Next run: groundhog undefined',
+    ]),
+  )
+})
+
 const started = (finish: 'merge' | 'pr' | 'none'): Event => ({
   type: 'run-started',
   spec: 25,

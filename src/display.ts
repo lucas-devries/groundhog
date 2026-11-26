@@ -3,7 +3,7 @@ import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
 import { type Hunk, keyArgument, readStreamLine } from './claude.ts'
-import { type Event, FINISH, integrationBranch } from './engine.ts'
+import { type Event, FINISH, integrationBranch, truncateFromStart } from './engine.ts'
 
 export interface DisplayOptions {
   /** ANSI colours; off without a terminal. */
@@ -29,8 +29,10 @@ export interface Position {
 export function display(options: DisplayOptions = {}): (e: Event) => string[] {
   const { width = 100 } = options
   const s = style(options.color ?? false)
-  const short = (t: string, n: number) => {
-    const l = stripVTControlCharacters(t).replace(/\s+/g, ' ').trim()
+  /** Truncates to `n` characters; unless `keepSpace`, as one line with single spaces. */
+  const short = (t: string, n: number, keepSpace = false) => {
+    const plain = stripVTControlCharacters(t)
+    const l = keepSpace ? plain : plain.replace(/\s+/g, ' ').trim()
     return l.length > n ? `${l.slice(0, n - 1)}…` : l
   }
 
@@ -99,6 +101,15 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
       case 'warning':
         return [s.yellow(`⚠ ${e.text}`)]
       case 'run-halted':
+        if (e.reason === 'setup') {
+          return [
+            `  ${s.red('✘')} Setup: ${e.command}`,
+            ...truncateFromStart(stripVTControlCharacters(e.output).replace(/\r/g, ''))
+              .split('\n')
+              .map((l) => `  │ ${short(l, width - 4, true)}`),
+            s.red('■ Run halted: setup failed, no ticket was taken'),
+          ]
+        }
         return [
           s.red(
             `■ Run halted at #${e.ticket}: usage limit without reset time, continues only with credit`,
@@ -118,7 +129,7 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
                 ? `${choice}: ${f.url}`
                 : f.type === 'none'
                   ? `${choice}: ${integration} stays`
-                  : `${choice} skipped because ${f.reason === 'aborted' ? 'the run was aborted' : 'tickets are open'}. Next run: groundhog ${spec}`
+                  : `${choice} skipped because ${SKIPPED[f.reason]}. Next run: groundhog ${spec}`
         const tickets =
           integrated === 0
             ? 'no tickets integrated'
@@ -138,6 +149,13 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
         return []
     }
   }
+}
+
+/** Why the finish was skipped. */
+const SKIPPED = {
+  'tickets open': 'tickets are open',
+  'setup failed': 'setup failed',
+  aborted: 'the run was aborted',
 }
 
 /** HH:MM in local time; if `ms` is on another day than `now`, with the date in front. */

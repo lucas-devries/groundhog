@@ -48,6 +48,7 @@ test('on No, init writes groundhog.json with all fields, commits nothing and nam
   const clone = githubClone()
   const { dialog } = fakeDialog([
     'npm test\n\n  npm run lint  \n',
+    'npm ci\n\n  make deps  \n',
     ['main', 'develop'],
     'a.com, b.com',
     '5',
@@ -61,6 +62,10 @@ test('on No, init writes groundhog.json with all fields, commits nothing and nam
   "checks": [
     "npm test",
     "npm run lint"
+  ],
+  "setup": [
+    "npm ci",
+    "make deps"
   ],
   "attempts": 5,
   "targetBranches": [
@@ -86,7 +91,7 @@ test('on No, init writes groundhog.json with all fields, commits nothing and nam
 test('on Yes, init commits a new groundhog.json on the current branch and says so', async () => {
   const clone = githubClone()
   git(clone, 'switch', '-q', '-c', 'setup')
-  const { dialog } = fakeDialog(['true', ['main'], '', '3', true])
+  const { dialog } = fakeDialog(['true', '', ['main'], '', '3', true])
 
   const result = await start(clone, dialog)
 
@@ -108,7 +113,7 @@ test('on Yes, a changed groundhog.json is committed alone; other changes stay an
   writeFileSync(join(clone, 'staged.txt'), 'new')
   git(clone, 'add', 'staged.txt')
   const heads = git(clone, 'ls-remote', '--heads', 'origin')
-  const { dialog } = fakeDialog([true, 'true', ['main'], '', '3', true])
+  const { dialog } = fakeDialog([true, 'true', '', ['main'], '', '3', true])
 
   const result = await start(clone, dialog)
 
@@ -121,11 +126,11 @@ test('on Yes, a changed groundhog.json is committed alone; other changes stay an
 
 test('a second init that keeps every value of a committed config asks no commit question', async () => {
   const clone = githubClone()
-  await start(clone, fakeDialog(['true', ['main'], '', '3', true]).dialog)
+  await start(clone, fakeDialog(['true', '', ['main'], '', '3', true]).dialog)
   // Hides untracked and ignored files from a plain `git status`; init must not rely on that.
   git(clone, 'config', 'status.showUntrackedFiles', 'no')
   const head = git(clone, 'rev-parse', 'HEAD')
-  const { dialog, shown } = fakeDialog(['true', ['main'], '', '3'])
+  const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '3'])
 
   const result = await start(clone, dialog)
 
@@ -137,8 +142,8 @@ test('a second init that keeps every value of a committed config asks no commit 
 
 test('a second init with a changed value asks the commit question again', async () => {
   const clone = githubClone()
-  await start(clone, fakeDialog(['true', ['main'], '', '3', true]).dialog)
-  const { dialog, shown } = fakeDialog(['true', ['main'], '', '4', true])
+  await start(clone, fakeDialog(['true', '', ['main'], '', '3', true]).dialog)
+  const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '4', true])
 
   const result = await start(clone, dialog)
 
@@ -151,20 +156,21 @@ test('a second init with a changed value asks the commit question again', async 
 test('an untracked config is offered for commit even if git status hides untracked files', async () => {
   const clone = githubClone()
   git(clone, 'config', 'status.showUntrackedFiles', 'no')
-  const { dialog } = fakeDialog(['true', ['main'], '', '3', true])
+  const { dialog } = fakeDialog(['true', '', ['main'], '', '3', true])
 
   await start(clone, dialog)
 
   expect(git(clone, 'show', '--name-status', '--format=')).toBe('A\tgroundhog.json')
 })
 
-test('init asks five questions: checks, target branches with the default branch first, hosts below the fixed list, attempts, commit', async () => {
+test('init asks six questions: checks, setup, target branches with the default branch first, hosts below the fixed list, attempts, commit', async () => {
   const clone = githubClone()
-  const { dialog, shown } = fakeDialog(['true', ['main'], '', '3', false])
+  const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '3', false])
 
   await start(clone, dialog)
 
   expect(shown).toEqual([
+    expect.objectContaining({ kind: 'multiline', initialValue: '' }),
     expect.objectContaining({ kind: 'multiline', initialValue: '' }),
     expect.objectContaining({
       kind: 'multiselect',
@@ -190,11 +196,11 @@ test('init asks five questions: checks, target branches with the default branch 
 })
 
 test('checks need at least one command, attempts a whole number from 1 to 10', async () => {
-  const { dialog, shown } = fakeDialog(['true', ['main'], '', '3', false])
+  const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '3', false])
   await start(githubClone(), dialog)
   type Validates = { validate: (value: string) => string | undefined }
   const checks = shown[0] as Validates
-  const attempts = shown[4] as Validates
+  const attempts = shown[5] as Validates
 
   expect(checks.validate(' \n ')).toBeDefined()
   expect(checks.validate('npm test')).toBeUndefined()
@@ -205,7 +211,7 @@ test('checks need at least one command, attempts a whole number from 1 to 10', a
 
 test('the order of the target branches follows the list, not the selection', async () => {
   const clone = githubClone()
-  const { dialog } = fakeDialog(['true', ['develop', 'main'], '', '3', false])
+  const { dialog } = fakeDialog(['true', '', ['develop', 'main'], '', '3', false])
 
   await start(clone, dialog)
 
@@ -225,7 +231,7 @@ test.each([
     const scripts = { build: 'tsc', test: 'vitest', typecheck: 'tsc --noEmit', lint: 'biome check' }
     writeFileSync(join(clone, 'package.json'), JSON.stringify({ scripts }))
     if (lockfile) writeFileSync(join(clone, lockfile), '')
-    const { dialog, shown } = fakeDialog(['true', ['main'], '', '3', false])
+    const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '3', false])
 
     await start(clone, dialog)
 
@@ -235,10 +241,34 @@ test.each([
   },
 )
 
-test('Ctrl+C at any of the four earlier questions writes nothing', async () => {
-  for (let question = 0; question < 4; question++) {
+test.each<[string, string | undefined, string]>([
+  ['no config and a package-lock.json', undefined, 'npm ci'],
+  ['a config without setup and a package-lock.json', '', 'npm ci'],
+  ['an existing empty setup and a package-lock.json', '"setup": [],', ''],
+])('setup suggestion with %s', async (_, setup, suggestion) => {
+  const clone = githubClone()
+  writeFileSync(join(clone, 'package-lock.json'), '')
+  if (setup !== undefined) {
+    writeFileSync(
+      join(clone, 'groundhog.json'),
+      `{ ${setup} "checks": ["true"], "targetBranches": ["main"] }`,
+    )
+  }
+  const { dialog, shown } = fakeDialog(['true', '', ['main'], '', '3', false])
+
+  await start(clone, dialog)
+
+  expect(shown[1]).toMatchObject({ kind: 'multiline', initialValue: suggestion })
+  // The empty answer is accepted, whatever was suggested.
+  const { validate } = shown[1] as { validate?: (v: string) => string | undefined }
+  expect(validate?.('')).toBeUndefined()
+  expect(JSON.parse(file(clone)).setup).toEqual([])
+})
+
+test('Ctrl+C at any of the five earlier questions writes nothing', async () => {
+  for (let question = 0; question < 5; question++) {
     const clone = githubClone()
-    const answers: Answer[] = ['true', ['main'], '', '3']
+    const answers: Answer[] = ['true', '', ['main'], '', '3']
     answers[question] = CANCEL
     const { dialog } = fakeDialog(answers)
 
@@ -251,7 +281,7 @@ test('Ctrl+C at any of the four earlier questions writes nothing', async () => {
 
 test('Ctrl+C at the commit question leaves the file written and uncommitted', async () => {
   const clone = githubClone()
-  const { dialog } = fakeDialog(['true', ['main'], '', '3', CANCEL])
+  const { dialog } = fakeDialog(['true', '', ['main'], '', '3', CANCEL])
 
   const result = await start(clone, dialog)
 
@@ -268,7 +298,7 @@ test('on Yes with a failing pre-commit hook, init shows the error of git and kee
   const clone = githubClone()
   const hook = join(clone, '.git', 'hooks', 'pre-commit')
   writeFileSync(hook, '#!/bin/sh\necho "hook says no"\nexit 1\n', { mode: 0o755 })
-  const { dialog } = fakeDialog(['true', ['main'], '', '3', true])
+  const { dialog } = fakeDialog(['true', '', ['main'], '', '3', true])
 
   const result = await start(clone, dialog)
 
@@ -286,17 +316,28 @@ test('second call: existing values as defaults, sandbox.off is kept', async () =
     join(clone, 'groundhog.json'),
     JSON.stringify({
       checks: ['make test', 'make lint'],
+      setup: ['make deps', 'make tools'],
       attempts: 7,
       targetBranches: ['develop', 'main'],
       sandbox: { hosts: ['x.com', 'y.com'], off: true },
     }),
   )
-  const { dialog, shown } = fakeDialog(['make test', ['main', 'develop'], 'x.com', '7', false])
+  // A package-lock.json does not replace the existing setup.
+  writeFileSync(join(clone, 'package-lock.json'), '')
+  const { dialog, shown } = fakeDialog([
+    'make test',
+    'make deps',
+    ['main', 'develop'],
+    'x.com',
+    '7',
+    false,
+  ])
 
   await start(clone, dialog)
 
   expect(shown).toEqual([
     expect.objectContaining({ initialValue: 'make test\nmake lint' }),
+    expect.objectContaining({ initialValue: 'make deps\nmake tools' }),
     expect.objectContaining({
       options: [
         { value: 'develop', label: 'develop' },
@@ -312,6 +353,7 @@ test('second call: existing values as defaults, sandbox.off is kept', async () =
   ])
   expect(JSON.parse(file(clone))).toEqual({
     checks: ['make test'],
+    setup: ['make deps'],
     attempts: 7,
     targetBranches: ['develop', 'main'],
     sandbox: { hosts: ['x.com'], off: true },
@@ -337,7 +379,7 @@ test('second call with an invalid file: show errors; on No the file stays unchan
 test('second call with an invalid file: on Yes create anew with fresh defaults', async () => {
   const clone = githubClone()
   writeFileSync(join(clone, 'groundhog.json'), 'broken')
-  const { dialog, shown } = fakeDialog([true, 'true', ['main'], '', '3', false])
+  const { dialog, shown } = fakeDialog([true, 'true', '', ['main'], '', '3', false])
 
   const result = await start(clone, dialog)
 

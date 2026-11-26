@@ -1,4 +1,5 @@
-import { realpathSync, rmSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Agent, Block, SessionResult } from './agent.ts'
 import type { Clock } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
@@ -27,6 +28,8 @@ export interface RunInput {
   /** The run's worktree: every session, check and git step happens there. */
   worktree: string
   checks: string[]
+  /** Commands that prepare a newly created worktree; the project config's `setup`. */
+  setup?: string[]
   /** Maximum number of attempts per ticket. */
   maxAttempts?: number
   /** Value of the `gh` token; the engine replaces it with `***` in session and check output. */
@@ -59,6 +62,8 @@ type RunEvent =
   /** `summary` as Markdown; the log stores it as `summary.md`. */
   | { type: 'run-finished'; finish: FinishResult; summary: string }
   | { type: 'warning'; text: string }
+  /** `setup` failed, before any ticket. */
+  | ({ type: 'run-halted'; reason: 'setup' } & CommandOutput)
 
 type TicketEvent = { ticket: number } & (
   | { type: 'ticket-taken' }
@@ -78,6 +83,12 @@ type TicketEvent = { ticket: number } & (
   | { type: 'ticket-done'; commit: string; attempts: number }
   | { type: 'ticket-failed'; attempts: number; verification: string }
 )
+
+/** A command of the project config and its output, filtered. */
+export interface CommandOutput {
+  command: string
+  output: string
+}
 
 /** A ticket in the task-graph, with the state the engine gives it by the frontier rule. */
 export interface GraphTicket extends Ticket {
@@ -105,19 +116,21 @@ export type FinishResult =
   | { type: 'conflict' }
   | { type: 'pr'; url: string }
   | { type: 'none' }
-  | { type: 'skipped'; reason: 'tickets open' | 'aborted' }
+  | { type: 'skipped'; reason: 'tickets open' | 'setup failed' | 'aborted' }
 
 export interface RunResult {
   tickets: TicketResult[]
   finish: FinishResult
-  /** Set if the run halted early: at the usage limit credit is missing, or aborted. */
-  halted?: 'credit' | 'aborted'
+  /** Set if the run halted early: no credit at the usage limit, a failing `setup`, or aborted. */
+  halted?: 'credit' | 'setup' | 'aborted'
 }
 
 const MINUTE = 60_000
 const SESSION_TIME_LIMIT = 60 * MINUTE
 /** For one pass of all checks together. */
 const CHECKS_TIME_LIMIT = 15 * MINUTE
+/** For all `setup` commands together. */
+const SETUP_TIME_LIMIT = 15 * MINUTE
 /** After the usage limit reset: `resetsAt` is rounded to seconds, the server clock may differ. */
 const RESET_BUFFER = MINUTE
 
@@ -172,10 +185,31 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   }
   report({ type: 'run-started', spec, choice, versions: input.versions ?? {} })
 
-  if (!isWorktreeOf(input.directory, worktree)) {
+  /** A failed removal only warns: it must not cost the summary. */
+  const removeWorktree = () => {
+    try {
+      git(input.directory, 'worktree', 'remove', '--force', worktree)
+    } catch (error) {
+      report({
+        type: 'warning',
+        text: `Removing the worktree ${worktree} failed: ${(error as Error).message}`,
+      })
+    }
+  }
+
+  /**
+   * Lies in the worktree's git directory until `setup` has run through. A worktree that still has
+   * it (failed removal, abort, crash) is created anew, so that `setup` is never skipped.
+   */
+  const setupMarker = () =>
+    join(git(worktree, 'rev-parse', '--absolute-git-dir'), 'groundhog-setup-pending')
+  const setup = input.setup ?? []
+  const fresh = !isWorktreeOf(input.directory, worktree) || existsSync(setupMarker())
+  if (fresh) {
     rmSync(worktree, { recursive: true, force: true })
     // -f twice also replaces a stale registration of this path, even a locked one.
     git(input.directory, 'worktree', 'add', '-q', '-f', '-f', '--detach', worktree)
+    if (setup.length > 0) writeFileSync(setupMarker(), '')
   }
   /** Throws away the work in the worktree; everything there is the agent's. */
   const discard = () => {
@@ -194,9 +228,36 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     git(worktree, 'checkout', '-q', integration)
   }
 
+  /** Runs `setup` in a new worktree, in order; returns the first red command, if there is one. */
+  const runSetup = async (): Promise<CommandOutput | undefined> => {
+    const timeout = clock.timeout(SETUP_TIME_LIMIT)
+    const signal = AbortSignal.any([timeout, abort])
+    for (const command of setup) {
+      const execution = await input.sandbox.execute(command, { directory: worktree, signal })
+      halt()
+      if (execution.exitCode === 0 && !timeout.aborted) continue
+      const limit = timeout.aborted
+        ? `\n[ended after ${SETUP_TIME_LIMIT / MINUTE} minutes (time limit for all of setup)]`
+        : ''
+      return { command, output: `${filter(execution.output)}${limit}` }
+    }
+    rmSync(setupMarker(), { force: true })
+    // Only ignored files may stay; anything else would turn the first ticket red.
+    discard()
+    return undefined
+  }
+
   /** The claimed ticket that is not finished yet. */
   let taken: number | undefined
   try {
+    const failed = fresh ? await runSetup() : undefined
+    if (failed) {
+      removeWorktree()
+      report({ type: 'run-halted', reason: 'setup', ...failed })
+      const finish: FinishResult = { type: 'skipped', reason: 'setup failed' }
+      await end(finish)
+      return { ...result, finish, halted: 'setup' }
+    }
     while (true) {
       const graph = (await tracker.taskGraph(spec)).map((t) => ({
         ...t,
@@ -215,17 +276,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           report,
         )
         // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
-        if (finish.type !== 'skipped') {
-          try {
-            git(input.directory, 'worktree', 'remove', '--force', worktree)
-          } catch (error) {
-            // The finish is through; a leftover folder must not cost the summary.
-            report({
-              type: 'warning',
-              text: `Removing the worktree ${worktree} failed: ${(error as Error).message}`,
-            })
-          }
-        }
+        if (finish.type !== 'skipped') removeWorktree()
         await end(finish)
         return { ...result, finish }
       }
@@ -247,7 +298,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         sessionTimedOut: boolean,
         results: VerificationResult[],
       ): Promise<Red | undefined> => {
-        const record = (name: string, ok: boolean, check?: { command: string; output: string }) => {
+        const record = (name: string, ok: boolean, check?: CommandOutput) => {
           results.push({ name, ok })
           report({ type: 'verification', ticket: nr, name, ok, ...check })
         }
@@ -456,7 +507,7 @@ interface Red {
 }
 
 /** Truncates an output from the start to the last 100 lines and 50 000 characters. */
-function truncateFromStart(output: string, mark = 'truncated'): string {
+export function truncateFromStart(output: string, mark = 'truncated'): string {
   const lines = output.trimEnd().split('\n')
   let truncated = lines.slice(-100).join('\n').slice(-50_000)
   if (truncated.length < output.trimEnd().length) truncated = `[${mark}]\n${truncated}`

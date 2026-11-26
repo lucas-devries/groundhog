@@ -85,7 +85,7 @@ groundhog runs on macOS and Linux. With the sandbox on, it refuses to start as `
 groundhog init
 ```
 
-`init` asks for your checks, the target branches, extra hosts for the sandbox, and the number of attempts. In a Node project it suggests the checks. The only file it writes is `groundhog.json`. Then it asks whether to commit it now (default: Yes). On Yes, it makes a local commit on the current branch that contains only `groundhog.json`, and pushes nothing. On No, commit the file yourself before you start a run. If the file does not differ from the committed one, there is no question. If git refuses the commit, `init` shows its error and exits with `1`; Ctrl+C at this question exits with `130`. In both cases the file stays written.
+`init` asks five things, in this order: your checks, the setup commands for a fresh worktree (one per line, may be empty), the target branches, extra hosts for the sandbox, and the number of attempts. In a Node project it suggests the checks. As setup it suggests the existing `setup`; if the config has none, `npm ci` in a repo with a `package-lock.json`, otherwise nothing. The only file it writes is `groundhog.json`. Then it asks whether to commit it now (default: Yes). On Yes, it makes a local commit on the current branch that contains only `groundhog.json`, and pushes nothing. On No, commit the file yourself before you start a run. If the file does not differ from the committed one, there is no question. If git refuses the commit, `init` shows its error and exits with `1`; Ctrl+C at this question exits with `130`. In both cases the file stays written.
 
 **2. Prepare a spec.** The spec is a GitHub issue. Its tickets are native **sub-issues**, and their order comes from native **issue dependencies** ("blocked by"). Label the tickets the agent may take `ready-for-agent`. `/to-spec` and `/to-tickets` from the Matt Pocock skills produce exactly this.
 
@@ -99,7 +99,7 @@ Before it touches anything, groundhog checks the tools, logins, skills and the s
 
 ### The run's worktree
 
-A run never touches your working directory. It works in a git worktree of your clone, at `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`; the hash keeps two clones of the same repo apart. Every session, every check and every git step of the engine happens there. While a ticket of the spec is open, the worktree stays after the run, and the next run of the same spec reuses it: it discards everything uncommitted without asking, keeps ignored files such as `node_modules`, and checks out the pushed `spec/<n>`. Once every ticket is closed and the finish has run, groundhog removes the worktree, whatever the finish result; your local `spec/<n>` stays. So resolve a merge conflict in your own directory. A broken worktree needs no repair by hand: if its folder is gone, or the folder at its path is not a worktree of your clone, the next run replaces it. Only the agent works in the worktree, so don't keep your own changes in it.
+A run never touches your working directory. It works in a git worktree of your clone, at `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`; the hash keeps two clones of the same repo apart. Every session, every check and every git step of the engine happens there. While a ticket of the spec is open, the worktree stays after the run, and the next run of the same spec reuses it: it discards everything uncommitted without asking, keeps ignored files such as `node_modules`, and checks out the pushed `spec/<n>`. A fresh worktree has none of your ignored files, so groundhog runs the `setup` commands in it once, right after creating it, and then discards every change to files that are not ignored. A reused worktree does not run them again. If one fails, the run halts before it takes any ticket, shows the command and its output, and removes the worktree, so the next start creates it and runs `setup` again. The same happens at the next start if an abort or a crash ended the run before `setup` was through. Once every ticket is closed and the finish has run, groundhog removes the worktree, whatever the finish result; your local `spec/<n>` stays. So resolve a merge conflict in your own directory. A broken worktree needs no repair by hand: if its folder is gone, or the folder at its path is not a worktree of your clone, the next run replaces it. Only the agent works in the worktree, so don't keep your own changes in it.
 
 ### Several specs in one start
 
@@ -116,7 +116,8 @@ Without an argument, groundhog offers every **ready spec**: an open issue with a
 
 ```json
 {
-  "checks": ["npm ci", "npm run typecheck", "npm test"],
+  "checks": ["npm run typecheck", "npm test"],
+  "setup": ["npm ci"],
   "attempts": 3,
   "targetBranches": ["main"],
   "sandbox": { "hosts": [], "off": false }
@@ -126,6 +127,7 @@ Without an argument, groundhog offers every **ready spec**: an open issue with a
 | Key              | Default  | Meaning                                                                                                |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------ |
 | `checks`         | required | Shell commands, run in order in the root of the run's worktree. The first red one ends the pass.       |
+| `setup`          | `[]`     | Shell commands, run once in a newly created worktree, in order. The first failing one halts the run.   |
 | `attempts`       | `3`      | Attempts per ticket, 1 to 10.                                                                          |
 | `targetBranches` | required | Branches a run may finish into. The first one is preselected.                                          |
 | `sandbox.hosts`  | `[]`     | Extra hosts the sandbox may reach, for example a private registry.                                     |
@@ -137,7 +139,7 @@ groundhog reports every error in the file at once, unknown keys included, so a t
 
 The engine runs outside the sandbox. It holds your `gh` token and does every git step itself: branches, the squash, fast-forward, push and finish. The agent only edits files and commits.
 
-Every session and its checks run inside `srt`:
+Every session, its checks and `setup` run inside `srt`:
 
 - **Writable:** the run's worktree, the `.git` directory your clone shares with it, `~/.claude` (except `settings.json`), `~/.claude.json`, the npm cache and temp.
 - **Read-only:** `.git/hooks`, `.git/config`, the worktree's `.git` file, the files in `.git/worktrees/spec-<n>/` that point git elsewhere (`commondir`, `gitdir`, `config.worktree`) and everything else, your working directory included.
@@ -156,14 +158,14 @@ Every session and its checks run inside `srt`:
 
 At the end you get a **summary** with one line per ticket: the result, attempts, pauses, duration, blocks and commit. groundhog also posts it as a comment on the spec, so you can read it from your phone.
 
-Each run keeps a **log** under `.git/groundhog/runs/`, outside your working tree. It has the raw output of every session, the full check output and `summary.md`. The last 10 runs are kept. Your `gh` token is replaced with `***` everywhere it could show up.
+Each run keeps a **log** under `.git/groundhog/runs/`, outside your working tree. It has the raw output of every session, the full check output, the output of a failed `setup` and `summary.md`. The last 10 runs are kept. Your `gh` token is replaced with `***` everywhere it could show up.
 
 ## Stopping and resuming
 
 - **One Ctrl+C does nothing**, so a stray keypress can't cost you a night. Press it twice within 5 seconds to abort cleanly. groundhog then discards the ticket's work in the worktree, leaves the worktree on `spec/<n>`, deletes the ticket branch, removes your assignment and releases the lock.
 - **After a crash, just run the same command again.** The integration branch is pushed after every green ticket, so no finished ticket is lost. Whatever a crash left in the worktree is discarded.
 - **Usage limit:** hitting it doesn't use up an attempt. groundhog waits for the reset and starts the same attempt again.
-- **Time limits:** a session gets 60 minutes and the checks get 15. Running into a limit counts as a red attempt.
+- **Time limits:** a session gets 60 minutes and the checks get 15. Running into a limit counts as a red attempt. All `setup` commands together get 15 minutes; running into that limit halts the run like a failing command.
 
 ## Commands
 

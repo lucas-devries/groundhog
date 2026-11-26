@@ -17,13 +17,14 @@ async function run(
   script: AgentScript[],
   options: {
     checks?: string[]
+    setup?: string[]
     token?: string
     next?: (e: Event) => void
     /** Runs between opening the log and the run. */
     afterOpen?: (path: string) => void
   } = {},
 ): Promise<string> {
-  const { checks = ['true'], token, next } = options
+  const { checks = ['true'], setup, token, next } = options
   const log = openLog({ directory: clone, spec: 1, start: START, next })
   options.afterOpen?.(log.path)
   await driveRun({
@@ -32,6 +33,7 @@ async function run(
     directory: clone,
     worktree: worktreeOf(clone),
     checks,
+    setup,
     token,
     versions: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },
     tracker: new InMemoryTracker('me', [
@@ -238,4 +240,14 @@ test('if the run folder cannot be created, the start aborts', () => {
   writeFileSync(join(clone, '.git/groundhog'), 'not a folder')
 
   expect(() => openLog({ directory: clone, spec: 1, start: START })).toThrow()
+})
+
+test('a failing setup has its command and output in setup.log, not in run.jsonl', async () => {
+  const { clone } = throwawayRepo()
+
+  const path = await run(clone, [], { setup: ['echo broken; false'] })
+
+  expect(readFileSync(join(path, 'setup.log'), 'utf8')).toBe('$ echo broken; false\nbroken\n')
+  const halted = lines(join(path, 'run.jsonl')).find((e) => e.type === 'run-halted')
+  expect(halted).toEqual({ type: 'run-halted', reason: 'setup', time: START })
 })

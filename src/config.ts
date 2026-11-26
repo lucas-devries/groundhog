@@ -7,6 +7,8 @@ export const DEFAULT_ATTEMPTS = 3
 /** The project config, `groundhog.json` in the repo root. */
 export interface Config {
   checks: string[]
+  /** Commands that run once in a newly created worktree. */
+  setup: string[]
   attempts: number
   targetBranches: string[]
   sandbox: { hosts: string[]; off: boolean }
@@ -57,6 +59,7 @@ export function readConfig(directory: string): ReadConfig {
   }
 
   const checks = list('checks', raw.checks, true)
+  const setup = list('setup', raw.setup, false)
   const attempts = raw.attempts ?? DEFAULT_ATTEMPTS
   if (!Number.isInteger(attempts) || (attempts as number) < 1 || (attempts as number) > 10) {
     errors.push('attempts: whole number from 1 to 10 expected')
@@ -71,7 +74,7 @@ export function readConfig(directory: string): ReadConfig {
   const off = sandbox.off ?? false
   if (typeof off !== 'boolean') errors.push('sandbox.off: true or false expected')
 
-  for (const k of unknownKeys(raw, ['checks', 'attempts', 'targetBranches', 'sandbox'])) {
+  for (const k of unknownKeys(raw, ['checks', 'setup', 'attempts', 'targetBranches', 'sandbox'])) {
     errors.push(`unknown key: ${k}`)
   }
   for (const k of unknownKeys(sandbox, ['hosts', 'off'])) {
@@ -83,6 +86,7 @@ export function readConfig(directory: string): ReadConfig {
     ok: true,
     config: {
       checks,
+      setup,
       attempts: attempts as number,
       targetBranches,
       sandbox: { hosts, off: off as boolean },

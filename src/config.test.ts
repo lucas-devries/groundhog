@@ -27,6 +27,7 @@ test('only the required fields give the defaults of the rest', () => {
     ok: true,
     config: {
       checks: ['npm test'],
+      setup: [],
       attempts: 3,
       targetBranches: ['main'],
       sandbox: { hosts: [], off: false },
@@ -37,6 +38,7 @@ test('only the required fields give the defaults of the rest', () => {
 test('all fields set are taken over', () => {
   const file = {
     checks: ['npm ci', 'npm test'],
+    setup: ['npm ci'],
     attempts: 10,
     targetBranches: ['develop', 'main'],
     sandbox: { hosts: ['*.example.com'], off: true },
@@ -114,4 +116,15 @@ test('all errors at once', () => {
     'sandbox.off: true or false expected',
     'unknown key: target',
   ])
+})
+
+test('setup may be empty; anything but a list of strings is reported with the other errors', () => {
+  const required = { checks: ['x'], targetBranches: ['main'] }
+  expect(errorsOf({ ...required, setup: [] })).toEqual([])
+  for (const setup of ['npm ci', ['npm ci', 1], null]) {
+    expect(errorsOf({ ...required, setup, attempts: 0 })).toEqual([
+      'setup: list of strings expected',
+      'attempts: whole number from 1 to 10 expected',
+    ])
+  }
 })
