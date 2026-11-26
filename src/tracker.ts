@@ -5,6 +5,8 @@ export const READY_FOR_HUMAN = 'ready-for-human'
 
 export interface Ticket {
   number: number
+  /** As the tracker shows it; left out where a test does not need it. */
+  title?: string
   open: boolean
   labels: string[]
   assignees: string[]

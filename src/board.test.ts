@@ -528,6 +528,86 @@ test.each([
   expect(b.screen(80, 14)[0]).toContain(spec)
 })
 
+test('in a batch one board shows every spec with its tickets and keeps them from run to run', () => {
+  const planned = (graphEvent: Event) =>
+    graphEvent.type === 'task-graph' ? graphEvent.tickets : []
+  const b = board({ position: { index: 1, total: 2 } }, [
+    { spec: 25, tickets: planned(graph(ticket(27), ticket(28))) },
+    {
+      spec: 31,
+      tickets: planned(graph(ticket(32), ticket(33, { blockers: [{ number: 32, open: true }] }))),
+    },
+  ])
+  const second: Event = { ...started, spec: 31 }
+  for (const e of [
+    started,
+    graph(ticket(27), ticket(28)),
+    { type: 'ticket-taken', ticket: 27, time: 0 },
+    { type: 'attempt-started', ticket: 27, attempt: 1, of: 3, time: 0 },
+  ] as Event[])
+    b.report(e)
+  expect(b.screen(80, 20).slice(0, 12)).toEqual([
+    'groundhog 1.2.3 · Spec #25 (1/2) · target branch main · finish PR',
+    '',
+    'Spec #25',
+    '  #27 ▶ running',
+    '  #28 · waiting',
+    'Spec #31',
+    '  #32 · waiting',
+    '  #33 ○ blocked by #32',
+    '─'.repeat(80),
+    '━━ Spec #25',
+    '━━ #27',
+    '',
+  ])
+
+  b.next({ position: { index: 2, total: 2 } })
+  for (const e of [
+    { type: 'ticket-done', ticket: 27, commit: 'abc', attempts: 1, time: 0 },
+    second,
+    graph(ticket(32), ticket(33, { blockers: [{ number: 32, open: true }] })),
+    { type: 'ticket-taken', ticket: 32, time: 0 },
+    { type: 'attempt-started', ticket: 32, attempt: 1, of: 3, time: 0 },
+  ] as Event[])
+    b.report(e)
+  expect(b.screen(80, 20).slice(0, 13)).toEqual([
+    'groundhog 1.2.3 · Spec #31 (2/2) · target branch main · finish PR',
+    '',
+    'Spec #25',
+    '  #27 ✔ done',
+    '  #28 · waiting',
+    'Spec #31',
+    '  #32 ▶ running',
+    '  #33 ○ blocked by #32',
+    '─'.repeat(80),
+    '━━ Spec #25',
+    '━━ #27',
+    '━━ Spec #31',
+    '━━ #32',
+  ])
+})
+
+test('in a batch, the heading of every spec stays when done tickets are left out', () => {
+  const done = (n: number) => ticket(n, { open: false })
+  const b = board({}, [
+    { spec: 25, tickets: [] },
+    { spec: 31, tickets: [] },
+  ])
+  b.report(started)
+  b.report(graph(done(26), done(27), done(28), ticket(29)))
+  // Half of 14 is 7: header and blank line, two headings, three tickets with the summing line.
+  expect(b.screen(60, 14).slice(0, 8)).toEqual([
+    'groundhog 1.2.3 · Spec #25 · target branch main · finish PR',
+    '',
+    'Spec #25',
+    '  #26 ✔ done',
+    '  #29 · waiting',
+    'Spec #31',
+    '  … 2 more tickets',
+    rule,
+  ])
+})
+
 /** A fake terminal for `showBoard`: what it wrote, and what it did with stdin. */
 function terminal(isTTY = true) {
   const written: string[] = []
@@ -549,7 +629,7 @@ function terminal(isTTY = true) {
       out as unknown as NodeJS.WriteStream,
       input as unknown as NodeJS.ReadStream,
       () => interrupts++,
-      { logDir },
+      board({ color: true, logDir }),
     )
   return { out, input, written, stdin, show, interrupts: () => interrupts }
 }
@@ -649,4 +729,16 @@ test('in the terminal: a failing setup stays readable on the normal screen after
   expect(normal).toContain('Setup: npm ci')
   expect(normal).toContain('│ E404')
   expect(normal).toContain('# Summary')
+})
+
+test('a ticket with a title shows it after its state, so the board says what is being worked on', () => {
+  const b = board()
+  b.report(started)
+  b.report(graph(ticket(27, { title: 'GitHub adapter' }), ticket(28, { title: 'Board' })))
+  b.report({ type: 'ticket-taken', ticket: 27, time: 0 })
+  b.report({ type: 'attempt-started', ticket: 27, attempt: 1, of: 3, time: 0 })
+  expect(b.screen(60, 14).slice(2, 4)).toEqual([
+    '  #27 ▶ running · GitHub adapter',
+    '  #28 · waiting · Board',
+  ])
 })

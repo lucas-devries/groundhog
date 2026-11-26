@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import * as p from '@clack/prompts'
 import { abortGuard } from './abort.ts'
 import { runBatch } from './batch.ts'
-import { showBoard } from './board.ts'
+import { board, type Section, showBoard } from './board.ts'
 import { claudeAgent } from './claude.ts'
 import { systemClock } from './clock.ts'
 import { display, type Position } from './display.ts'
@@ -13,6 +13,7 @@ import { init } from './init.ts'
 import { openLog } from './log.ts'
 import { passthrough } from './sandbox.ts'
 import { type Ready, start } from './start.ts'
+import { frontierState } from './tracker.ts'
 import { install, newerVersion, update, VERSION } from './update.ts'
 
 const HELP = `groundhog ${VERSION}: works through the tickets of a spec, without humans.
@@ -91,9 +92,11 @@ async function runSpecs(specs: number[]): Promise<number> {
     return ready.exitCode
   }
   try {
+    // One board for the whole batch, so the tickets of every spec stay in view.
+    const model = process.stdout.isTTY ? board({ color: true }, await plan(ready)) : undefined
     const { exitCode, overview } = await runBatch(ready.specs, (spec, position) => {
       herdrReport = newHerdrReport()
-      return run(ready, spec, position, next, (to) => {
+      return run(ready, spec, position, next, model, (to) => {
         show = to
       })
     })
@@ -102,6 +105,21 @@ async function runSpecs(specs: number[]): Promise<number> {
   } finally {
     ready.release()
   }
+}
+
+/** The specs of a batch with their tickets for the board; a batch of one needs none. */
+async function plan({ specs, tracker }: Ready): Promise<Section[]> {
+  if (specs.length < 2) return []
+  return Promise.all(
+    specs.map(async (spec) => ({
+      spec,
+      // Without the tracker the board shows the spec's tickets only once its run reads them.
+      tickets: await tracker.taskGraph(spec).then(
+        (tickets) => tickets.map((t) => ({ ...t, state: frontierState(t, tracker.user) })),
+        () => [],
+      ),
+    })),
+  )
 }
 
 function newHerdrReport() {
@@ -114,6 +132,7 @@ async function run(
   spec: number,
   position: Position,
   next: (e: Event) => void,
+  model: ReturnType<typeof board> | undefined,
   showWith: (show: (e: Event) => void) => void,
 ): Promise<number> {
   /** Leaves the board, so that an error message stays on the normal screen. */
@@ -125,15 +144,13 @@ async function run(
     // The start has already opened the log of the first run.
     const log =
       position.index === 1 ? ready.log : openLog({ directory, spec, start: Date.now(), next })
-    if (process.stdout.isTTY) {
+    if (model) {
       // In raw mode Ctrl+C is a byte on stdin; it counts like SIGINT.
       const interrupt = () => receive('SIGINT')
-      const board = showBoard(process.stdout, process.stdin, interrupt, {
-        logDir: log.path,
-        position,
-      })
-      close = board.close
-      showWith(board.report)
+      model.next({ logDir: log.path, position })
+      const shown = showBoard(process.stdout, process.stdin, interrupt, model)
+      close = shown.close
+      showWith(shown.report)
     } else {
       const lines = display({ logDir: log.path, position })
       showWith((e) => {

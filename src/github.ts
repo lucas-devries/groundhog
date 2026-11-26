@@ -16,6 +16,7 @@ const TASK_GRAPH = `query($owner: String!, $repo: String!, $spec: Int!) {
       subIssues(first: 100) {
         nodes {
           number
+          title
           state
           labels(first: 100) { nodes { name } }
           assignees(first: 100) { nodes { login } }
@@ -50,6 +51,7 @@ interface Nodes<T> {
 
 interface IssueNode {
   number: number
+  title: string
   state: 'OPEN' | 'CLOSED'
   labels: Nodes<{ name: string }>
   assignees: Nodes<{ login: string }>
@@ -102,6 +104,7 @@ export class GitHubTracker implements Tracker {
     const nodes: IssueNode[] = answer.data.repository.issue.subIssues.nodes
     return nodes.map((n) => ({
       number: n.number,
+      title: n.title,
       open: n.state === 'OPEN',
       labels: n.labels.nodes.map((l) => l.name),
       assignees: n.assignees.nodes.map((a) => a.login),

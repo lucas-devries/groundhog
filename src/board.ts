@@ -4,6 +4,12 @@ import type { Event, GraphTicket } from './engine.ts'
 
 export type BoardOptions = Omit<DisplayOptions, 'width'>
 
+/** A spec of a batch with its tickets as the tracker showed them before its run. */
+export interface Section {
+  spec: number
+  tickets: GraphTicket[]
+}
+
 /** How many transcript lines the board keeps at most; the log keeps all of them. */
 const TRANSCRIPT_MAX = 10_000
 
@@ -26,14 +32,19 @@ const SCROLL_INPUT = /\x1b(?:[[O]([ABHF])|\[([145678])~|\[<(6[45]);\d+;\d+M)/g
 /**
  * The board: a fixed screen of header, task-graph, warnings, the transcripts of the run's
  * sessions and a footer. `report` takes every event of the run in order and returns the lines the
- * continuous output would write for it (for the closing lines).
+ * continuous output would write for it (for the closing lines). In a batch, `plan` names every
+ * spec with its tickets: one board then lasts the whole batch, shows the tickets of every spec
+ * under its heading, and `next` hands it the options of each further run.
  */
-export function board(options: BoardOptions = {}) {
+export function board(options: BoardOptions = {}, plan: Section[] = []) {
   const s = style(options.color ?? false)
   // Untruncated; truncation happens only when drawing, to the width the window has right now.
-  const lines = display({ ...options, width: Number.POSITIVE_INFINITY })
+  let lines = display({ ...options, width: Number.POSITIVE_INFINITY })
   let header = ''
-  let tickets: GraphTicket[] = []
+  /** The tickets per spec, in the order of the batch; outside a batch only the spec of the run. */
+  const sections = new Map(plan.map((p) => [p.spec, p.tickets]))
+  const batch = sections.size > 1
+  let current = 0
   /** State of the tickets this run has touched; the others show the tracker. */
   const state = new Map<number, string>()
   /** Tickets this run has finished. */
@@ -66,9 +77,11 @@ export function board(options: BoardOptions = {}) {
     switch (e.type) {
       case 'run-started':
         header = added[0] ?? ''
+        current = e.spec
+        if (batch) append([s.bold(`━━ Spec #${e.spec}`)])
         break
       case 'task-graph':
-        tickets = e.tickets
+        sections.set(current, e.tickets)
         break
       case 'attempt-started':
         attempt = e.attempt > 1 ? ` · Attempt ${e.attempt} of ${e.of}` : ''
@@ -154,7 +167,8 @@ export function board(options: BoardOptions = {}) {
 
   /**
    * The lines of the task-graph, in the tracker's order and at most `max`: done tickets are left
-   * out first. Running, paused and failed tickets always stay, even beyond `max`.
+   * out first. Running, paused and failed tickets always stay, even beyond `max`, and so does the
+   * heading of every spec in a batch.
    */
   const taskGraph = (max: number) => {
     const [mustStay, open, finished] = [0, 1, 2]
@@ -164,16 +178,24 @@ export function board(options: BoardOptions = {}) {
       if (state.has(t.number)) return mustStay
       return t.state === 'closed' ? finished : open
     }
+    const tickets = [...sections.values()].flat()
+    const headings = batch ? sections.size : 0
     const staying = tickets.filter((t) => rank(t) === mustStay).length
-    // One line less than `max` for the line that sums up the others.
-    const slots = tickets.length > max ? Math.max(staying, max - 1) : max
+    const room = max - headings
+    // One line less than `room` for the line that sums up the others.
+    const slots = tickets.length > room ? Math.max(staying, room - 1) : room
     const shown = new Set(tickets.toSorted((a, b) => rank(a) - rank(b)).slice(0, slots))
-    const graph = tickets
-      .filter((t) => shown.has(t))
-      .map((t) => `  #${t.number} ${state.get(t.number) ?? before(t, s)}`)
+    const line = (t: GraphTicket) =>
+      `  #${t.number} ${state.get(t.number) ?? before(t, s)}${t.title ? ` · ${t.title}` : ''}`
+    const graph = batch
+      ? [...sections].flatMap(([spec, list]) => [
+          spec === current ? s.bold(`Spec #${spec}`) : `Spec #${spec}`,
+          ...list.filter((t) => shown.has(t)).map(line),
+        ])
+      : tickets.filter((t) => shown.has(t)).map(line)
     const more = tickets.length - shown.size
     if (more > 0) graph.push(`  … ${more} more ticket${more === 1 ? '' : 's'}`)
-    return { graph, staying }
+    return { graph, staying: staying + headings }
   }
 
   /** Exactly `height` lines, none wider than `width`. */
@@ -198,7 +220,12 @@ export function board(options: BoardOptions = {}) {
     return [...top, ...middle, rule, bottom].map((l) => truncate(l, width))
   }
 
-  return { report, input, screen }
+  /** Hands the board the options of the next run of the batch, before its first event. */
+  const next = (run: Omit<BoardOptions, 'color'>) => {
+    lines = display({ ...options, ...run, width: Number.POSITIVE_INFINITY })
+  }
+
+  return { report, input, screen, next }
 }
 
 /** State of a ticket this run has not touched (yet), as the engine reports it. */
@@ -245,15 +272,15 @@ function truncate(line: string, width: number): string {
  * Shows the board in the terminal `out` (alternate screen) and redraws it on every event, every
  * input and every resize. Keys and the mouse wheel are read from `input` in raw mode, where Ctrl+C
  * sends no SIGINT: it goes to `interrupt` instead. At the end of the run it returns to the normal
- * screen and writes the closing lines there: summary, integration branch, finish.
+ * screen and writes the closing lines there: summary, integration branch, finish. `b` is the
+ * board to show; in a batch the same one for every run, so it keeps the tickets and transcripts.
  */
 export function showBoard(
   out: NodeJS.WriteStream,
   input: NodeJS.ReadStream,
   interrupt: () => void,
-  options: Omit<BoardOptions, 'color'> = {},
+  b: ReturnType<typeof board>,
 ) {
-  const b = board({ ...options, color: true })
   let active = true
   const draw = () => {
     const lines = b.screen(out.columns || 100, out.rows || 30)
@@ -268,7 +295,7 @@ export function showBoard(
   const close = () => {
     if (!active) return
     active = false
-    // A batch shows one board per run.
+    // A batch puts the same board on the screen again for each run.
     process.off('exit', close)
     out.off('resize', draw)
     if (input.isTTY) {

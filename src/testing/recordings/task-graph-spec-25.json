@@ -6,6 +6,7 @@
           "nodes": [
             {
               "number": 26,
+              "title": "Erster grüner Lauf",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -13,6 +14,7 @@
             },
             {
               "number": 27,
+              "title": "Frontier über den Task-Graph",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -20,6 +22,7 @@
             },
             {
               "number": 28,
+              "title": "Rote Versuche und endgültiges Scheitern",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -27,6 +30,7 @@
             },
             {
               "number": 29,
+              "title": "Usage-Limit und Timeouts",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -34,6 +38,7 @@
             },
             {
               "number": 30,
+              "title": "Abschluss",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -41,6 +46,7 @@
             },
             {
               "number": 31,
+              "title": "Projekt-Konfiguration und groundhog init",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -48,6 +54,7 @@
             },
             {
               "number": 32,
+              "title": "GitHub-Adapter",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -57,6 +64,7 @@
             },
             {
               "number": 33,
+              "title": "Claude-Adapter",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -66,6 +74,7 @@
             },
             {
               "number": 34,
+              "title": "Sandbox mit srt",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -75,6 +84,7 @@
             },
             {
               "number": 35,
+              "title": "Befehl groundhog <spec>",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -90,6 +100,7 @@
             },
             {
               "number": 36,
+              "title": "Prüfung der Skills am Start",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -97,6 +108,7 @@
             },
             {
               "number": 37,
+              "title": "Protokoll",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -104,6 +116,7 @@
             },
             {
               "number": 38,
+              "title": "Übersicht und Kommentare",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -113,6 +126,7 @@
             },
             {
               "number": 39,
+              "title": "Mitschrift und fortlaufende Ausgabe",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -120,6 +134,7 @@
             },
             {
               "number": 40,
+              "title": "Tafel",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -129,6 +144,7 @@
             },
             {
               "number": 41,
+              "title": "Abbruch und Wiederaufnahme",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -138,6 +154,7 @@
             },
             {
               "number": 42,
+              "title": "Update",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -145,6 +162,7 @@
             },
             {
               "number": 43,
+              "title": "Herdr-Meldung",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-agent" }] },
               "assignees": { "nodes": [] },
@@ -152,6 +170,7 @@
             },
             {
               "number": 44,
+              "title": "Probelauf an echter Spec",
               "state": "OPEN",
               "labels": { "nodes": [{ "name": "ready-for-human" }] },
               "assignees": { "nodes": [] },

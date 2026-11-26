@@ -37,7 +37,7 @@ test('the logged-in gh user is the user of the tracker', async () => {
   expect(tracker.user).toBe('lucas-devries')
 })
 
-test('the task-graph is the sub-issues of the spec with state, labels, assignees and blockers, from one GraphQL query', async () => {
+test('the task-graph is the sub-issues of the spec with title, state, labels, assignees and blockers, from one GraphQL query', async () => {
   const { tracker, calls } = await connected([recording('task-graph-spec-25.json')])
 
   const tickets = await tracker.taskGraph(25)
@@ -47,6 +47,7 @@ test('the task-graph is the sub-issues of the spec with state, labels, assignees
   ])
   expect(tickets.find((t) => t.number === 32)).toEqual({
     number: 32,
+    title: 'GitHub-Adapter',
     open: true,
     labels: ['ready-for-agent'],
     assignees: [],
