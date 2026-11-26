@@ -1,14 +1,7 @@
 {
-  "checks": [
-    "npm ci",
-    "npm run typecheck",
-    "npm run lint",
-    "npm run test"
-  ],
+  "checks": ["npm ci", "npm run typecheck", "npm run lint", "npm run test"],
   "attempts": 3,
-  "targetBranches": [
-    "main"
-  ],
+  "targetBranches": ["main"],
   "sandbox": {
     "hosts": [],
     "off": false

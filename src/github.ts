@@ -196,6 +196,10 @@ function ghProcess(directory: string, args: string[], input: string): Promise<st
       if (code === 0) resolve(stdout)
       else reject(Object.assign(new Error(`Exit ${code}`), { stderr }))
     })
+    // A `gh` that ends without reading its stdin breaks the pipe; its exit code tells the outcome.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') reject(error)
+    })
     child.stdin.end(input)
   })
 }
