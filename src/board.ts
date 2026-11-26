@@ -13,12 +13,19 @@ const TRANSCRIPT_MAX = 10_000
 
 const CTRL_C = 0x03
 
+/** Lines one notch of the mouse wheel moves by. */
+const WHEEL_LINES = 3
+
+/** Mouse reporting: button events (1002) in SGR encoding (1006). */
+const MOUSE_ON = '\x1b[?1002h\x1b[?1006h'
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1002l'
+
 /**
  * ↑ ↓ Home End as `ESC [` or `ESC O` (application cursor keys), PgUp PgDn and the other Home and
- * End as `ESC [ n ~`.
+ * End as `ESC [ n ~`, a notch of the mouse wheel as `ESC [ < 64 or 65 ; x ; y M` (SGR).
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal key sequences
-const SCROLL_KEY = /\x1b(?:[[O]([ABHF])|\[([145678])~)/g
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal key and mouse sequences
+const SCROLL_INPUT = /\x1b(?:[[O]([ABHF])|\[([145678])~|\[<(6[45]);\d+;\d+M)/g
 
 /**
  * The board: a fixed screen of header, task-graph, warnings, the transcripts of the run's
@@ -113,7 +120,7 @@ export function board(options: BoardOptions = {}) {
   /** Raw bytes as they arrive on stdin; only scrolls, `screen` shows the result. */
   const input = (data: Buffer | string) => {
     const page = Math.max(1, room - 1)
-    /** Lines each key of `SCROLL_KEY` moves by. */
+    /** Lines each key or wheel direction of `SCROLL_INPUT` moves by. */
     const moves: Record<string, number> = {
       A: -1, // ↑
       B: 1, // ↓
@@ -125,10 +132,13 @@ export function board(options: BoardOptions = {}) {
       F: Infinity, // End, in three variants
       4: Infinity,
       8: Infinity,
+      64: -WHEEL_LINES, // wheel up
+      65: WHEEL_LINES, // wheel down
     }
-    for (const [, letter, number] of String(data).matchAll(SCROLL_KEY)) {
-      // The pattern matches only keys of `moves`.
-      scroll(moves[(letter ?? number) as string] as number)
+    // ponytail: a sequence split across two chunks is dropped; buffer the tail if that shows.
+    for (const [, letter, keyCode, wheel] of String(data).matchAll(SCROLL_INPUT)) {
+      // Exactly one of the three groups matches, and only keys of `moves`.
+      scroll(moves[(letter ?? keyCode ?? wheel) as string] as number)
     }
   }
 
@@ -197,9 +207,9 @@ function truncate(line: string, width: number): string {
 
 /**
  * Shows the board in the terminal `out` (alternate screen) and redraws it on every event, every
- * input and every resize. Keys are read from `input` in raw mode, where Ctrl+C sends no SIGINT:
- * it goes to `interrupt` instead. At the end of the run it returns to the normal screen and
- * writes the closing lines there: summary, integration branch, finish.
+ * input and every resize. Keys and the mouse wheel are read from `input` in raw mode, where Ctrl+C
+ * sends no SIGINT: it goes to `interrupt` instead. At the end of the run it returns to the normal
+ * screen and writes the closing lines there: summary, integration branch, finish.
  */
 export function showBoard(
   out: NodeJS.WriteStream,
@@ -225,6 +235,8 @@ export function showBoard(
     out.off('resize', draw)
     if (input.isTTY) {
       input.off('data', read)
+      // Before raw mode ends, so that no mouse report gets echoed.
+      out.write(MOUSE_OFF)
       input.setRawMode(false)
       // Otherwise reading stdin keeps the process alive.
       input.pause()
@@ -240,6 +252,7 @@ export function showBoard(
     input.setRawMode(true)
     input.on('data', read)
     input.resume()
+    out.write(MOUSE_ON)
   }
   const report = (e: Event) => {
     const lines = b.report(e)

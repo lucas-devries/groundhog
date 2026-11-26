@@ -135,7 +135,7 @@ Every session and its checks run inside `srt`:
 
 ## Watching a run
 
-- **In a terminal** you get the **board** shown above. It lists every ticket with its state, then the transcripts, which follow the live session: text, tool calls and coloured diffs. The engine's verifications come after their session, each one on its own line. The transcripts of earlier sessions are kept, with a separator line before each attempt. Scroll them with ↑/↓, PgUp/PgDn, Home and End: while you are scrolled up, the view stays put and the footer counts the new lines, and End follows the live session again.
+- **In a terminal** you get the **board** shown above. It lists every ticket with its state, then the transcripts, which follow the live session: text, tool calls and coloured diffs. The engine's verifications come after their session, each one on its own line. The transcripts of earlier sessions are kept, with a separator line before each attempt. Scroll them with the mouse wheel (three lines per notch) or with ↑/↓, PgUp/PgDn, Home and End: while you are scrolled up, the view stays put and the footer counts the new lines. Scrolling down to the end, or End, follows the live session again. Because the board reads the mouse, a plain drag no longer selects text in most terminals: hold Shift while dragging (Option in iTerm).
 - **In a file or a pipe**, the same content comes out line by line.
 - **In Herdr**, groundhog reports its status and progress as an agent. There's nothing to set up.
 

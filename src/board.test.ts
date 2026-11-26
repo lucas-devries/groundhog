@@ -229,6 +229,9 @@ const KEY = {
   pageDown: '\x1b[6~',
   home: '\x1b[H',
   end: '\x1b[F',
+  // SGR mouse reports: button, column, row.
+  wheelUp: '\x1b[<64;5;5M',
+  wheelDown: '\x1b[<65;5;5M',
 }
 
 /**
@@ -300,14 +303,33 @@ test('keys in the variants of other terminals, also several in one chunk', () =>
   }
 })
 
+test('a notch of the mouse wheel moves three lines, back to the end follows the live end', () => {
+  const { b, say, view, shown } = scrollable()
+  b.input(KEY.wheelUp)
+  expect(shown()).toEqual([14, 15, 16, 17])
+  // Several notches in one chunk, anywhere in the window.
+  b.input(Buffer.from('\x1b[<64;1;1M\x1b[<64;60;10M'))
+  expect(shown()).toEqual([8, 9, 10, 11])
+  b.input(KEY.wheelDown)
+  expect(shown()).toEqual([11, 12, 13, 14])
+  say(1)
+  expect(view().at(-1)).toBe('↓ 1 new line · End to follow')
+  b.input(KEY.wheelDown.repeat(3))
+  expect(view().at(-1)).toBe('')
+  say(1)
+  expect(shown()).toEqual([19, 20, 21, 22])
+})
+
 test('unknown bytes are ignored', () => {
   const { b, view } = scrollable()
   b.input(KEY.up)
   const before = view()
-  // Letters, Ctrl+C, a bare Escape, ← →, Delete, Shift+↑, F5 and a mouse click.
+  // Letters, Ctrl+C, a bare Escape, ← →, Delete, Shift+↑ and F5.
   for (const bytes of ['jkq G', '\x03', '\x1b', '\x1b[D\x1b[C', '\x1b[3~', '\x1b[1;2A', '\x1b[15~'])
     b.input(bytes)
-  b.input('\x1b[<0;5;5M')
+  // Mouse: left click and release, middle and right click, drag, wheel to the left and right.
+  b.input('\x1b[<0;5;5M\x1b[<0;5;5m\x1b[<1;5;5M\x1b[<2;5;5M\x1b[<32;6;5M')
+  b.input('\x1b[<66;5;5M\x1b[<67;5;5M')
   b.input(Buffer.from([0xff, 0x00]))
   expect(view()).toEqual(before)
 })
@@ -426,7 +448,7 @@ function terminal(isTTY = true) {
 test('in the terminal: alternate screen, redrawn on event and resize, closing lines on the normal screen', () => {
   const { out, written, show } = terminal()
   const { report } = show('/repo/.git/groundhog/runs/x')
-  expect(written.shift()).toBe('\x1b[?1049h\x1b[?25l\x1b[?7l')
+  expect(written.splice(0, 2)).toEqual(['\x1b[?1049h\x1b[?25l\x1b[?7l', '\x1b[?1002h\x1b[?1006h'])
 
   report(started)
   report(graph(ticket(27)))
@@ -437,7 +459,7 @@ test('in the terminal: alternate screen, redrawn on event and resize, closing li
 
   written.length = 0
   report({ type: 'run-finished', finish: { type: 'none' }, summary: '# Summary', time: 0 })
-  expect(written[0]).toBe('\x1b[?7h\x1b[?25h\x1b[?1049l')
+  expect(written.slice(0, 2)).toEqual(['\x1b[?1006l\x1b[?1002l', '\x1b[?7h\x1b[?25h\x1b[?1049l'])
   expect(written).toContain('# Summary\n')
   expect(written.at(-1)).toBe('Summary: /repo/.git/groundhog/runs/x/summary.md\n')
 
@@ -450,6 +472,8 @@ test('in the terminal: reads keys in raw mode, redraws on each, hands Ctrl+C on,
   const { input, written, stdin, show, interrupts } = terminal()
   const { report, close } = show()
   expect(stdin).toEqual(['raw true', 'resume'])
+  // Mouse reporting: button events, SGR encoding.
+  expect(written.at(-1)).toBe('\x1b[?1002h\x1b[?1006h')
   report(started)
   for (let i = 1; i <= 5; i++) report(assistant(27, `line ${i}`))
 
@@ -461,6 +485,8 @@ test('in the terminal: reads keys in raw mode, redraws on each, hands Ctrl+C on,
   input.emit('data', Buffer.from('\x03'))
   expect(written).toHaveLength(2)
   expect(interrupts()).toBe(1)
+  input.emit('data', Buffer.from(KEY.wheelUp))
+  expect(written.pop()).toContain('End to follow')
   input.emit('data', Buffer.from('\x03\x03'))
   expect(interrupts()).toBe(3)
 
@@ -469,28 +495,31 @@ test('in the terminal: reads keys in raw mode, redraws on each, hands Ctrl+C on,
   close()
   close()
   expect(stdin).toEqual(['raw false', 'pause'])
-  expect(written).toEqual(['\x1b[?7h\x1b[?25h\x1b[?1049l'])
+  expect(written).toEqual(['\x1b[?1006l\x1b[?1002l', '\x1b[?7h\x1b[?25h\x1b[?1049l'])
   input.emit('data', Buffer.from('\x03'))
-  expect(written).toHaveLength(1)
+  expect(written).toHaveLength(2)
   expect(interrupts()).toBe(3)
   expect(input.listenerCount('data')).toBe(0)
 })
 
-test('in the terminal: the end of the run and the exit of the process leave raw mode', () => {
+test('in the terminal: the end of the run and the exit of the process leave raw mode and mouse reporting', () => {
   for (const end of ['run', 'exit']) {
-    const { stdin, show } = terminal()
+    const { written, stdin, show } = terminal()
     const before = process.listeners('exit')
     const { report } = show()
     if (end === 'run')
       report({ type: 'run-finished', finish: { type: 'none' }, summary: '', time: 0 })
     else for (const l of process.listeners('exit')) if (!before.includes(l)) (l as () => void)()
     expect(stdin.slice(-2)).toEqual(['raw false', 'pause'])
+    expect(written.join('')).toContain('\x1b[?1006l\x1b[?1002l')
   }
 })
 
 test('in the terminal: without a terminal on stdin, stdin is not touched', () => {
-  const { input, stdin, show } = terminal(false)
+  const { input, written, stdin, show } = terminal(false)
   show().close()
   expect(stdin).toEqual([])
+  // Mouse reports would arrive on a stdin nobody reads.
+  expect(written.join('')).not.toContain('?100')
   expect(input.listenerCount('data')).toBe(0)
 })

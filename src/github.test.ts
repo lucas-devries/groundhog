@@ -1,4 +1,5 @@
-import { delimiter } from 'node:path'
+import { writeFileSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { GitHubTracker } from './github.ts'
 import { fakeGh, type GhAnswer, recording } from './testing/fake-gh.ts'
@@ -22,6 +23,7 @@ async function connected(answers: GhAnswer[]) {
   return {
     tracker,
     delays,
+    directory: gh.directory,
     calls: () =>
       gh
         .calls()
@@ -122,6 +124,14 @@ test('commenting and creating a PR pass the text to gh via stdin', async () => {
       input: 'Closes #25',
     },
   ])
+})
+
+test('a gh that ends without reading stdin is reported by its exit, not by a broken pipe', async () => {
+  const { tracker, directory } = await connected([])
+  writeFileSync(join(directory, 'gh'), '#!/bin/sh\necho "gh: denied" >&2\nexit 1\n')
+
+  // More than a pipe buffers, so the write is still under way when gh is gone.
+  await expect(tracker.comment(25, 'x'.repeat(1_000_000))).rejects.toThrow(/gh: denied/)
 })
 
 test('the start check reports missing labels, the number of sub-issues and the repo URL', async () => {
