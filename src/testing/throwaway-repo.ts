@@ -22,6 +22,9 @@ export function throwawayRepo(): { remote: string; clone: string; newClone: () =
   const clone = newClone()
   commitFile(clone, 'README.md', 'init', 'init')
   git(clone, 'push', '-q', 'origin', 'main')
+  // The clone came from an empty remote and has no origin/HEAD yet; git 2.48+ would create it on
+  // the next fetch and change the refs the tests compare.
+  git(clone, 'remote', 'set-head', 'origin', '-a')
   return { remote, clone, newClone }
 }
 
