@@ -1,12 +1,8 @@
 import { stripVTControlCharacters } from 'node:util'
-import { display, style, timeOfDay } from './display.ts'
+import { type DisplayOptions, display, style, timeOfDay } from './display.ts'
 import type { Event, GraphTicket } from './engine.ts'
 
-export interface BoardOptions {
-  color?: boolean
-  /** Folder of the log, for the closing lines. */
-  logDir?: string
-}
+export type BoardOptions = Omit<DisplayOptions, 'width'>
 
 /** How many transcript lines the board keeps at most; the log keeps all of them. */
 const TRANSCRIPT_MAX = 10_000
@@ -247,9 +243,9 @@ export function showBoard(
   out: NodeJS.WriteStream,
   input: NodeJS.ReadStream,
   interrupt: () => void,
-  logDir?: string,
+  options: Omit<BoardOptions, 'color'> = {},
 ) {
-  const b = board({ color: true, logDir })
+  const b = board({ ...options, color: true })
   let active = true
   const draw = () => {
     const lines = b.screen(out.columns || 100, out.rows || 30)
@@ -264,6 +260,8 @@ export function showBoard(
   const close = () => {
     if (!active) return
     active = false
+    // A batch shows one board per run.
+    process.off('exit', close)
     out.off('resize', draw)
     if (input.isTTY) {
       input.off('data', read)

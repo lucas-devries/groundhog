@@ -518,6 +518,15 @@ test('with colours, truncation is ANSI-safe', () => {
   expect(header).toBe('\x1b[2mgroundhog 1…\x1b[0m')
 })
 
+test.each([
+  { total: 3, spec: 'Spec #25 (2/3) ·' },
+  { total: 1, spec: 'Spec #25 ·' },
+])('in a batch of $total the board header shows "$spec"', ({ total, spec }) => {
+  const b = board({ position: { index: Math.min(2, total), total } })
+  b.report(started)
+  expect(b.screen(80, 14)[0]).toContain(spec)
+})
+
 /** A fake terminal for `showBoard`: what it wrote, and what it did with stdin. */
 function terminal(isTTY = true) {
   const written: string[] = []
@@ -539,7 +548,7 @@ function terminal(isTTY = true) {
       out as unknown as NodeJS.WriteStream,
       input as unknown as NodeJS.ReadStream,
       () => interrupts++,
-      logDir,
+      { logDir },
     )
   return { out, input, written, stdin, show, interrupts: () => interrupts }
 }

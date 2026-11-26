@@ -96,6 +96,15 @@ groundhog 57
 
 Before it touches anything, groundhog checks the tools, logins, skills, the sandbox and a clean working tree. Then it asks everything at once: the target branch and the finish (merge, PR or nothing). It asks for confirmation once more if you choose to merge straight into `main`. After that, it needs no more input.
 
+### Several specs in one start
+
+```sh
+groundhog           # choose from the ready specs
+groundhog 57 58 61  # or name them, in the order they run
+```
+
+Without an argument, groundhog offers every **ready spec**: an open issue with at least one ticket that is released for the agent and not claimed by someone else. All of them are preselected, oldest first. The specs form a **batch** and run one after another. Every start check runs before the first run, and the target branch and the finish apply to all of them. The batch stops at the first run that does not end with exit code `0`; the specs after it stay untouched. At the end, one line per spec shows `green`, `ready-for-human`, `aborted` or `not started`.
+
 ## Configuration
 
 `groundhog.json` lives in the repo root and is checked in:
@@ -153,14 +162,16 @@ Each run keeps a **log** under `.git/groundhog/runs/`, outside your working tree
 ## Commands
 
 ```text
+groundhog            choose ready specs and run over them
 groundhog <spec>     run over the tickets of the spec with this issue number
+groundhog <spec> …   run over several specs, one after another
 groundhog init       create or change the project config groundhog.json
 groundhog update     install the newest version
 groundhog --version  show the version
 groundhog --help     show help
 ```
 
-Exit codes: `0` everything green, `2` at least one ticket went to a human, `1` the start or the run was aborted, `130` aborted with Ctrl+C.
+Exit codes: `0` everything green, `2` at least one ticket went to a human, `1` the start or the run was aborted, `130` aborted with Ctrl+C. For several specs, it's the exit code of the last run that ran.
 
 ## Development
 

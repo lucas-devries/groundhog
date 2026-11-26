@@ -40,6 +40,13 @@ export function frontierState(t: Ticket, user: string): FrontierState {
   return 'workable'
 }
 
+/**
+ * Whether a spec is ready: a run over it would have something to do, now or once a blocker closes.
+ */
+export function isReady(tickets: Ticket[], user: string): boolean {
+  return tickets.some((t) => ['workable', 'blocked'].includes(frontierState(t, user)))
+}
+
 /** The tracker in the shape the engine needs. Behind it: GitHub adapter (#32), in-memory tracker. */
 export interface Tracker {
   /** The logged-in user the engine claims for. */
