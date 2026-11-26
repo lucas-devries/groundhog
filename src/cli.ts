@@ -8,7 +8,7 @@ import { claudeAgent } from './claude.ts'
 import { systemClock } from './clock.ts'
 import { display, type Position } from './display.ts'
 import { driveRun, type Event } from './engine.ts'
-import { herdr, herdrAgent } from './herdr.ts'
+import { herdr, herdrAgent, herdrStart } from './herdr.ts'
 import { init } from './init.ts'
 import { openLog } from './log.ts'
 import { passthrough } from './sandbox.ts'
@@ -66,6 +66,7 @@ async function runSpecs(specs: number[]): Promise<number> {
   let show: (e: Event) => void = () => {}
   const agent = herdrAgent(process.env)
   let herdrReport = newHerdrReport()
+  process.stdout.write(herdrStart(process.env, process.stdout.isTTY === true))
   // Sync, so the release also works in the 'exit' handler; Herdr being gone must not stop the run.
   const callHerdr = (args: string[] | undefined) =>
     args &&

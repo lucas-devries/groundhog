@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { Event } from './engine.ts'
-import { herdr, herdrAgent } from './herdr.ts'
+import { herdr, herdrAgent, herdrStart } from './herdr.ts'
 import { frontierState, type Ticket } from './tracker.ts'
 
 const ticket = (number: number, open = true): Ticket => ({
@@ -30,8 +30,17 @@ function sequences(events: Event[]): string[] {
   return events.flatMap((e) => report(e) ?? [])
 }
 
-test('from the first ticket on, groundhog reports working with the current ticket and the share of closed tickets', () => {
+test('while the start asks its questions, groundhog reports blocked', () => {
+  expect(herdrStart({ HC_TERMINAL_ID: 't1' }, true)).toBe(
+    `\x1b]7501;state=blocked:app=groundhog:msg=${btoa('Start')}:progress=0\x07`,
+  )
+  expect(herdrStart({}, true)).toBe('')
+  expect(herdrStart({ HC_TERMINAL_ID: 't1' }, false)).toBe('')
+})
+
+test('from the start of the run on, groundhog reports working with the spec, then with the current ticket and the share of closed tickets', () => {
   expect(sequences([started, graph(ticket(2, false), ticket(3), ticket(4)), taken(3)])).toEqual([
+    `\x1b]7501;state=working:app=groundhog:msg=${btoa('Spec #25')}:progress=0\x07`,
     `\x1b]7501;state=working:app=groundhog:msg=${btoa('Ticket #3')}:progress=33\x07`,
   ])
 })
@@ -71,6 +80,7 @@ test('at the end groundhog reports done if no ticket failed', () => {
       finished,
     ]),
   ).toEqual([
+    `\x1b]7501;state=working:app=groundhog:msg=${btoa('Spec #25')}:progress=0\x07`,
     `\x1b]7501;state=working:app=groundhog:msg=${btoa('Ticket #2')}:progress=0\x07`,
     `\x1b]7501;state=working:app=groundhog:msg=${btoa('Ticket #3')}:progress=50\x07`,
     `\x1b]7501;state=done:app=groundhog:msg=${btoa('Spec #25')}:progress=100\x07`,

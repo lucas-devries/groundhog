@@ -48,7 +48,10 @@ export function herdr(
   let progress = 0
   let failed = false
   return (e) => {
-    if (e.type === 'run-started') spec = e.spec
+    if (e.type === 'run-started') {
+      spec = e.spec
+      return osc('working', `Spec #${spec}`, progress)
+    }
     if (e.type === 'ticket-failed') failed = true
     if (e.type === 'task-graph') {
       const closed = e.tickets.filter((t) => !t.open).length
@@ -58,6 +61,14 @@ export function herdr(
     if (e.type === 'run-finished') return osc(failed ? 'error' : 'done', `Spec #${spec}`, progress)
     return undefined
   }
+}
+
+/**
+ * The report to hc while the start asks its questions: blocked, so groundhog shows up as an
+ * agent waiting for the human from the first moment, not only from the first ticket on.
+ */
+export function herdrStart(env: { HC_TERMINAL_ID?: string }, isTerminal: boolean): string {
+  return env.HC_TERMINAL_ID && isTerminal ? osc('blocked', 'Start', 0) : ''
 }
 
 /** `ESC ]7501;key=value:key=value BEL`, `msg` in Base64. */
