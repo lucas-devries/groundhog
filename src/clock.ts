@@ -1,5 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 
+export const MINUTE = 60_000
+
 /** The engine's clock. Behind it: system time, manual clock. */
 export interface Clock {
   /** Milliseconds since the epoch. */

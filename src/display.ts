@@ -3,7 +3,8 @@ import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
 import { type Hunk, keyArgument, readStreamLine } from './claude.ts'
-import { type Event, FINISH, integrationBranch, truncateFromStart } from './engine.ts'
+import { type Event, FINISH, integrationBranch } from './engine.ts'
+import { truncateFromStart } from './summary.ts'
 
 export interface DisplayOptions {
   /** ANSI colours; off without a terminal. */

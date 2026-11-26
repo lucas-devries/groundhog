@@ -214,3 +214,11 @@ function resumeCommand(worktree: string, sessionId?: string): string | undefined
   const path = /^[\w./-]+$/.test(worktree) ? worktree : `'${worktree.replaceAll("'", `'\\''`)}'`
   return `cd ${path} && claude --resume ${sessionId}`
 }
+
+/** Truncates an output from the start to the last 100 lines and 50 000 characters. */
+export function truncateFromStart(output: string, mark = 'truncated'): string {
+  const lines = output.trimEnd().split('\n')
+  let truncated = lines.slice(-100).join('\n').slice(-50_000)
+  if (truncated.length < output.trimEnd().length) truncated = `[${mark}]\n${truncated}`
+  return truncated
+}

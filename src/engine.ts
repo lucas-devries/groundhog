@@ -1,10 +1,11 @@
-import type { Agent, Block, SessionResult } from './agent.ts'
-import { type Choice, integrationBranch, ticketBranchOf } from './choice.ts'
-import type { Clock } from './clock.ts'
+import type { Agent, SessionResult } from './agent.ts'
+import { type Choice, integrationBranch } from './choice.ts'
+import { type Clock, MINUTE } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
-import { branchExists, git } from './git.ts'
+import { git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
-import { failedComment, resumeInfo, summary } from './summary.ts'
+import { resumeInfo, summary } from './summary.ts'
+import { type RunContext, ticketFlow } from './ticket-flow.ts'
 import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
 import { prepareWorktree } from './worktree.ts'
 
@@ -39,7 +40,7 @@ export interface RunInput {
 
 export type Event = (RunEvent | TicketEvent) & { time: number }
 
-type RunEvent =
+export type RunEvent =
   | {
       type: 'run-started'
       spec: number
@@ -57,7 +58,7 @@ type RunEvent =
   /** `setup` failed, before any ticket. */
   | ({ type: 'run-halted'; reason: 'setup' } & CommandOutput)
 
-type TicketEvent = { ticket: number } & (
+export type TicketEvent = { ticket: number } & (
   | { type: 'ticket-taken' }
   | { type: 'attempt-started'; attempt: number; of: number }
   /** Pause at the usage limit; `reset` is the reset time in ms, without buffer. */
@@ -77,7 +78,7 @@ type TicketEvent = { ticket: number } & (
 )
 
 /** A command of the project config and its output, filtered. */
-interface CommandOutput {
+export interface CommandOutput {
   command: string
   output: string
 }
@@ -87,7 +88,7 @@ export interface GraphTicket extends Ticket {
   state: FrontierState
 }
 
-interface VerificationResult {
+export interface VerificationResult {
   name: string
   ok: boolean
 }
@@ -117,25 +118,13 @@ export interface RunResult {
   halted?: 'credit' | 'setup' | 'aborted'
 }
 
-const MINUTE = 60_000
-const SESSION_TIME_LIMIT = 60 * MINUTE
-/** For one pass of all checks together. */
-const CHECKS_TIME_LIMIT = 15 * MINUTE
 /** For all `setup` commands together. */
 const SETUP_TIME_LIMIT = 15 * MINUTE
-/** After the usage limit reset: `resetsAt` is rounded to seconds, the server clock may differ. */
-const RESET_BUFFER = MINUTE
-
-/** Thrown by the engine at the places where it accepts an abort. */
-class Aborted extends Error {}
 
 /** Drives a whole run over the tickets of a spec. */
 export async function driveRun(input: RunInput): Promise<RunResult> {
   const { spec, choice, worktree, tracker, clock, maxAttempts = DEFAULT_ATTEMPTS } = input
   const abort = input.abort ?? new AbortController().signal
-  const halt = () => {
-    if (abort.aborted) throw new Aborted()
-  }
   /** What the summary needs: all events without the raw output of the sessions. */
   const history: Event[] = []
   const report = (e: RunEvent | TicketEvent) => {
@@ -143,7 +132,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     if (event.type !== 'session-output') history.push(event)
     input.report?.(event)
   }
-  // The one place where the token disappears from session and check output. The agent only
+  // The one place where the token disappears from session, check and setup output. The agent only
   // evaluates the filtered line; everything it reports (blocks too) is thus already filtered.
   const filter = (text: string) => (input.token ? text.replaceAll(input.token, '***') : text)
   const integration = integrationBranch(spec)
@@ -166,6 +155,13 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     await comment(spec, `${text}\n\n${resumeInfo(input.logDir)}`)
     input.report?.({ ...ending, summary: text })
   }
+  /** Orderly abort: no comment on the spec. */
+  const aborted = (): RunResult => {
+    const finish: FinishResult = { type: 'skipped', reason: 'aborted' }
+    const ending = { type: 'run-finished', finish, time: clock.now() } as const
+    input.report?.({ ...ending, summary: summary([...history, { ...ending, summary: '' }]) })
+    return { ...result, finish, halted: 'aborted' }
+  }
   report({ type: 'run-started', spec, choice, worktree, versions: input.versions ?? {} })
 
   const setup = input.setup ?? []
@@ -178,13 +174,20 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     warn: (text) => report({ type: 'warning', text }),
   })
 
+  /** Orderly abort between two tickets: discard what lies around. */
+  const abortBetweenTickets = (): RunResult => {
+    prepared.discard()
+    git(worktree, 'checkout', '-q', '-f', integration)
+    return aborted()
+  }
+
   /** Runs `setup` in a new worktree, in order; returns the first red command, if there is one. */
-  const runSetup = async (): Promise<CommandOutput | undefined> => {
+  const runSetup = async (): Promise<CommandOutput | 'aborted' | undefined> => {
     const timeout = clock.timeout(SETUP_TIME_LIMIT)
     const signal = AbortSignal.any([timeout, abort])
     for (const command of setup) {
       const execution = await input.sandbox.execute(command, { directory: worktree, signal })
-      halt()
+      if (abort.aborted) return 'aborted'
       if (execution.exitCode === 0 && !timeout.aborted) continue
       const limit = timeout.aborted
         ? `\n[ended after ${SETUP_TIME_LIMIT / MINUTE} minutes (time limit for all of setup)]`
@@ -195,272 +198,61 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     return undefined
   }
 
-  /** The claimed ticket that is not finished yet. */
-  let taken: number | undefined
-  try {
-    const failed = prepared.setupDue ? await runSetup() : undefined
-    if (failed) {
-      prepared.remove()
-      report({ type: 'run-halted', reason: 'setup', ...failed })
-      const finish: FinishResult = { type: 'skipped', reason: 'setup failed' }
-      await end(finish)
-      return { ...result, finish, halted: 'setup' }
-    }
-    while (true) {
-      const graph = (await tracker.taskGraph(spec)).map((t) => ({
-        ...t,
-        state: frontierState(t, tracker.user),
-      }))
-      report({ type: 'task-graph', tickets: graph })
-      halt()
-      const ticket = graph
-        .filter((t) => t.state === 'workable')
-        .sort((a, b) => a.number - b.number)[0]
-      if (!ticket) {
-        const finish = await doFinish(
-          input,
-          graph.every((t) => !t.open),
-          comment,
-          report,
-        )
-        // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
-        if (finish.type !== 'skipped') prepared.remove()
-        await end(finish)
-        return { ...result, finish }
-      }
-      const nr = ticket.number
-      const ticketBranch = ticketBranchOf(nr)
+  const run: RunContext = {
+    ...input,
+    maxAttempts,
+    abort,
+    report,
+    filter,
+    comment,
+    discard: prepared.discard,
+  }
 
-      await tracker.claim(nr)
-      taken = nr
-      report({ type: 'ticket-taken', ticket: nr })
-      git(worktree, 'checkout', '-q', '-B', ticketBranch, integration)
-      const forkPoint = git(worktree, 'rev-parse', 'HEAD')
-
-      /**
-       * Verifies an attempt and records every verification in `results`; on red, returns the red
-       * verification and the feedback for the next session.
-       */
-      const verify = async (
-        sessionSuccess: boolean,
-        sessionTimedOut: boolean,
-        results: VerificationResult[],
-      ): Promise<Red | undefined> => {
-        const record = (name: string, ok: boolean, check?: CommandOutput) => {
-          results.push({ name, ok })
-          report({ type: 'verification', ticket: nr, name, ok, ...check })
-        }
-        const verifications: [string, boolean][] = [
-          ['Session successful', sessionSuccess && !sessionTimedOut],
-          [`HEAD on ${ticketBranch}`, currentBranch(worktree) === ticketBranch],
-          [
-            'new commit since fork point',
-            git(worktree, 'rev-list', '--count', `${forkPoint}..${ticketBranch}`) !== '0',
-          ],
-          ['working tree clean', git(worktree, 'status', '--porcelain') === ''],
-        ]
-        for (const [name, ok] of verifications) record(name, ok)
-        const red = verifications.find(([, ok]) => !ok)
-        if (red) {
-          return {
-            verification: red[0],
-            feedback: sessionTimedOut
-              ? `The last attempt was red: the session was ended after ${SESSION_TIME_LIMIT / MINUTE} minutes.`
-              : `The last attempt was red: verification "${red[0]}" not passed.`,
-          }
-        }
-        const timeout = clock.timeout(CHECKS_TIME_LIMIT)
-        const signal = AbortSignal.any([timeout, abort])
-        for (const check of input.checks) {
-          const execution = await input.sandbox.execute(check, { directory: worktree, signal })
-          halt()
-          const { exitCode } = execution
-          const output = filter(execution.output)
-          const verification = `Check: ${check}`
-          const ok = exitCode === 0 && !timeout.aborted
-          record(verification, ok, { command: check, output })
-          if (!ok) {
-            const reason = timeout.aborted
-              ? `was ended after ${CHECKS_TIME_LIMIT / MINUTE} minutes (time limit for all checks)`
-              : `ended with exit ${exitCode}`
-            return {
-              verification,
-              feedback: `The last attempt was red: check \`${check}\` ${reason}.\n\n${truncateFromStart(output)}`,
-              output,
-            }
-          }
-        }
-        return undefined
-      }
-
-      let red: Red | undefined
-      let attempt = 0
-      let sessions = 0
-      const blocks: Block[] = []
-      /** The red verification of each attempt. */
-      const reds: string[] = []
-      let sessionId: string | undefined
-      while (attempt < maxAttempts) {
-        attempt++
-        report({ type: 'attempt-started', ticket: nr, attempt, of: maxAttempts })
-        let session: SessionResult
-        let signal: AbortSignal
-        while (true) {
-          // Every restart after the usage limit is a session of its own with its own number.
-          halt()
-          const s = ++sessions
-          signal = clock.timeout(SESSION_TIME_LIMIT)
-          session = await input.agent.runSession({
-            ticket,
-            directory: worktree,
-            forkPoint,
-            feedback: red?.feedback,
-            signal: AbortSignal.any([signal, abort]),
-            output: (raw) => {
-              const line = filter(raw)
-              report({ type: 'session-output', ticket: nr, session: s, line })
-              return line
-            },
-          })
-          report({ type: 'session-finished', ticket: nr, session: s, attempt, ...session })
-          blocks.push(...(session.blocks ?? []))
-          sessionId = session.sessionId
-          halt()
-          if (session.usageLimit === undefined) break
-          // Usage limit: no attempt used up; the same attempt restarts after the reset.
-          if (session.usageLimit === 'credit') {
-            // Doesn't reset by itself: ticket, branch and work stay in place.
-            const finish: FinishResult = { type: 'skipped', reason: 'tickets open' }
-            report({ type: 'run-halted', ticket: nr, reason: 'credit' })
-            await end(finish)
-            return { ...result, finish, halted: 'credit' }
-          }
-          let reset: number | undefined = session.usageLimit
-          while (reset !== undefined) {
-            report({ type: 'pause', ticket: nr, reset })
-            await clock.wait(Math.max(0, reset - clock.now()) + RESET_BUFFER, abort)
-            halt()
-            reset = await input.agent.exhaustedUntil()
-          }
-        }
-        const verifications: VerificationResult[] = []
-        red = await verify(session.success, signal.aborted, verifications)
-        report({ type: 'attempt-finished', ticket: nr, attempt, verifications })
-        if (!red) break
-        reds.push(red.verification)
-        // If the agent closed the ticket itself, that doesn't count.
-        await tracker.reopen(nr)
-        if (currentBranch(worktree) !== ticketBranch) {
-          git(worktree, 'checkout', '-q', '-f', ticketBranch)
-        }
-      }
-
-      if (red) {
-        prepared.discard()
-        git(worktree, 'checkout', '-q', '-f', integration)
-        deleteTicketBranch(worktree, ticketBranch)
-        await tracker.markFailed(nr)
-        await tracker.release(nr)
-        await comment(
-          nr,
-          failedComment({
-            reds,
-            maxAttempts,
-            output:
-              red.output === undefined
-                ? undefined
-                : truncateFromStart(red.output, 'truncated, full output in the log'),
-            blocks: blocks.length,
-            worktree,
-            sessionId,
-            logDir: input.logDir,
-          }),
-        )
-        report({
-          type: 'ticket-failed',
-          ticket: nr,
-          attempts: attempt,
-          verification: red.verification,
-        })
-        taken = undefined
-        result.tickets.push({
-          number: nr,
-          result: 'failed',
-          attempts: attempt,
-          verification: red.verification,
-        })
-        continue
-      }
-
-      if (git(worktree, 'rev-list', '--count', `${forkPoint}..HEAD`) !== '1') {
-        // Exceptional case: squash into one commit, the messages verbatim one after the other.
-        const messages = git(
-          worktree,
-          'log',
-          '-z',
-          '--reverse',
-          '--format=%B',
-          `${forkPoint}..HEAD`,
-        )
-          .split('\0')
-          .map((m) => m.trim())
-          .filter(Boolean)
-        git(worktree, 'reset', '-q', '--soft', forkPoint)
-        git(worktree, 'commit', '-q', '-m', messages.join('\n\n'))
-      }
-      git(worktree, 'checkout', '-q', integration)
-      git(worktree, 'merge', '-q', '--ff-only', ticketBranch)
-      git(worktree, 'push', '-q', 'origin', integration)
-      const commit = git(worktree, 'rev-parse', 'HEAD')
-      report({ type: 'push', branch: integration, commit })
-      deleteTicketBranch(worktree, ticketBranch)
-      await comment(
-        nr,
-        `Done: ${commit} in ${integration}, attempt ${attempt} of ${maxAttempts}, blocks: ${blocks.length}`,
+  const failed = prepared.setupDue ? await runSetup() : undefined
+  if (failed === 'aborted') return abortBetweenTickets()
+  if (failed) {
+    prepared.remove()
+    report({ type: 'run-halted', reason: 'setup', ...failed })
+    const finish: FinishResult = { type: 'skipped', reason: 'setup failed' }
+    await end(finish)
+    return { ...result, finish, halted: 'setup' }
+  }
+  while (true) {
+    const graph = (await tracker.taskGraph(spec)).map((t) => ({
+      ...t,
+      state: frontierState(t, tracker.user),
+    }))
+    report({ type: 'task-graph', tickets: graph })
+    if (abort.aborted) return abortBetweenTickets()
+    const ticket = graph
+      .filter((t) => t.state === 'workable')
+      .sort((a, b) => a.number - b.number)[0]
+    if (!ticket) {
+      const finish = await doFinish(
+        input,
+        graph.every((t) => !t.open),
+        comment,
+        report,
       )
-      await tracker.close(nr)
-      report({ type: 'ticket-done', ticket: nr, commit, attempts: attempt })
-      taken = undefined
-      result.tickets.push({ number: nr, result: 'done', attempts: attempt, commit })
+      // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
+      if (finish.type !== 'skipped') prepared.remove()
+      await end(finish)
+      return { ...result, finish }
     }
-  } catch (error) {
-    if (!(error instanceof Aborted)) throw error
+
+    await tracker.claim(ticket.number)
+    report({ type: 'ticket-taken', ticket: ticket.number })
+    const outcome = await ticketFlow(ticket, run)
+    if (outcome.result !== 'halted') {
+      result.tickets.push({ number: ticket.number, ...outcome })
+      continue
+    }
+    if (outcome.reason === 'aborted') return aborted()
+    // No credit: ticket, branch and work stay in place.
+    const finish: FinishResult = { type: 'skipped', reason: 'tickets open' }
+    await end(finish)
+    return { ...result, finish, halted: 'credit' }
   }
-
-  // Orderly abort: discard the work, release the ticket, no comment on the spec.
-  prepared.discard()
-  git(worktree, 'checkout', '-q', '-f', integration)
-  if (taken !== undefined) {
-    deleteTicketBranch(worktree, ticketBranchOf(taken))
-    await tracker.release(taken)
-  }
-  const finish: FinishResult = { type: 'skipped', reason: 'aborted' }
-  const ending = { type: 'run-finished', finish, time: clock.now() } as const
-  input.report?.({ ...ending, summary: summary([...history, { ...ending, summary: '' }]) })
-  return { ...result, finish, halted: 'aborted' }
-}
-
-/** Deletes the ticket branch locally and on the remote, as far as it exists. */
-function deleteTicketBranch(directory: string, branch: string) {
-  if (branchExists(directory, branch)) git(directory, 'branch', '-q', '-D', branch)
-  if (git(directory, 'ls-remote', '--heads', 'origin', branch)) {
-    git(directory, 'push', '-q', 'origin', '--delete', branch)
-  }
-}
-
-interface Red {
-  verification: string
-  feedback: string
-  /** Output of the red check, untruncated, filtered. */
-  output?: string
-}
-
-/** Truncates an output from the start to the last 100 lines and 50 000 characters. */
-export function truncateFromStart(output: string, mark = 'truncated'): string {
-  const lines = output.trimEnd().split('\n')
-  let truncated = lines.slice(-100).join('\n').slice(-50_000)
-  if (truncated.length < output.trimEnd().length) truncated = `[${mark}]\n${truncated}`
-  return truncated
 }
 
 /** The finish: only if all tickets of the spec are closed, otherwise the integration branch stays. */
@@ -507,8 +299,4 @@ async function doFinish(
       await comment(spec, `Integration branch: ${integration}`)
       return { type: 'none' }
   }
-}
-
-function currentBranch(directory: string): string {
-  return git(directory, 'branch', '--show-current')
 }
