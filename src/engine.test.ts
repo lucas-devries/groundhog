@@ -451,7 +451,12 @@ test('a second run reuses the worktree and discards a leftover change without as
   const worktree = worktreeOf(clone)
   commitFile(clone, '.gitignore', 'ignored\n', 'ignore')
   git(clone, 'push', '-q', 'origin', 'main')
-  await run(clone, oneTicket(), [commits])
+  // Ticket 4 stays open, so the worktree stays.
+  const unfinished = new InMemoryTracker('me', [
+    oneTicket().ticket(2),
+    { number: 4, open: true, labels: ['ready-for-human'], assignees: [], blockers: [] },
+  ])
+  await run(clone, unfinished, [commits])
   // Left behind: an ignored file stays, everything else goes.
   writeFileSync(join(worktree, 'ignored'), 'x')
   writeFileSync(join(worktree, 'a.txt'), 'changed')

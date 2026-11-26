@@ -99,7 +99,7 @@ Before it touches anything, groundhog checks the tools, logins, skills and the s
 
 ### The run's worktree
 
-A run never touches your working directory. It works in a git worktree of your clone, at `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`; the hash keeps two clones of the same repo apart. Every session, every check and every git step of the engine happens there. The worktree stays after the run, and the next run of the same spec reuses it: it discards everything uncommitted without asking, keeps ignored files such as `node_modules`, and checks out the pushed `spec/<n>`. Only the agent works there, so don't keep your own changes in it.
+A run never touches your working directory. It works in a git worktree of your clone, at `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`; the hash keeps two clones of the same repo apart. Every session, every check and every git step of the engine happens there. While a ticket of the spec is open, the worktree stays after the run, and the next run of the same spec reuses it: it discards everything uncommitted without asking, keeps ignored files such as `node_modules`, and checks out the pushed `spec/<n>`. Once every ticket is closed and the finish has run, groundhog removes the worktree, whatever the finish result; your local `spec/<n>` stays. So resolve a merge conflict in your own directory. Only the agent works in the worktree, so don't keep your own changes in it.
 
 ### Several specs in one start
 

@@ -22,7 +22,7 @@ export const FINISH: Record<Choice['finish'], string> = {
 export interface RunInput {
   spec: number
   choice: Choice
-  /** Repo root of the clone; only used to add the worktree. */
+  /** Repo root of the clone; only used to add and remove the worktree. */
   directory: string
   /** The run's worktree: every session, check and git step happens there. */
   worktree: string
@@ -206,6 +206,18 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           comment,
           report,
         )
+        // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
+        if (finish.type !== 'skipped') {
+          try {
+            git(input.directory, 'worktree', 'remove', '--force', worktree)
+          } catch (error) {
+            // The finish is through; a leftover folder must not cost the summary.
+            report({
+              type: 'warning',
+              text: `Removing the worktree ${worktree} failed: ${(error as Error).message}`,
+            })
+          }
+        }
         await end(finish)
         return { ...result, finish }
       }

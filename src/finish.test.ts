@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { expect, test } from 'vitest'
 import { type AgentScript, fakeAgent } from './agent.ts'
 import { manualClock } from './clock.ts'
@@ -43,6 +44,50 @@ function run(
     report,
   })
 }
+
+/** The worktree folder is gone, git only lists the clone, and `spec/1` is still there. */
+function expectWorktreeRemoved(clone: string) {
+  expect(existsSync(worktreeOf(clone))).toBe(false)
+  expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1)
+  expect(git(clone, 'branch', '--list', 'spec/1')).not.toBe('')
+}
+
+test.each(['merge', 'pr', 'none'] as const)(
+  '%s: with every ticket closed, the worktree is removed and the integration branch stays',
+  async (finish) => {
+    const { clone } = throwawayRepo()
+
+    await run(clone, new InMemoryTracker('me', [ticket(2)]), { targetBranch: 'main', finish })
+
+    expectWorktreeRemoved(clone)
+  },
+)
+
+test('a worktree that cannot be removed only warns; the run ends with the summary', async () => {
+  const { clone } = throwawayRepo()
+  const tracker = new InMemoryTracker('me', [ticket(2)])
+  const events: Event[] = []
+
+  const result = await run(
+    clone,
+    tracker,
+    { targetBranch: 'main', finish: 'none' },
+    [
+      (request) => {
+        git(clone, 'worktree', 'lock', request.directory)
+        return implementsTicket(request)
+      },
+    ],
+    (e) => events.push(e),
+  )
+
+  expect(result.finish).toEqual({ type: 'none' })
+  expect(events.filter((e) => e.type === 'warning')).toMatchObject([
+    { text: expect.stringContaining(worktreeOf(clone)) },
+  ])
+  expect(events.at(-1)?.type).toBe('run-finished')
+  expect(tracker.comments(1).at(-1)).toContain('# Summary of spec #1')
+})
 
 test('merge reports the push into the target branch', async () => {
   const { remote, clone } = throwawayRepo()
@@ -93,14 +138,13 @@ test('merge with conflict: merge aborted, integration and target branch unchange
   expect(result.finish).toEqual({ type: 'conflict' })
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
   expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
-  expect(git(worktreeOf(clone), 'status', '--porcelain')).toBe('')
-  expect(git(worktreeOf(clone), 'branch', '--show-current')).toBe('spec/1')
+  expectWorktreeRemoved(clone)
   expect(tracker.isOpen(1)).toBe(true)
   expect(tracker.comments(1).slice(0, -1)).toEqual([])
 })
 
 test.each(['merge', 'pr', 'none'] as const)(
-  '%s: if not all tickets are closed, the finish is skipped',
+  '%s: if not all tickets are closed, the finish is skipped and the worktree stays',
   async (finish) => {
     const { remote, clone } = throwawayRepo()
     const tracker = new InMemoryTracker('me', [
@@ -117,6 +161,7 @@ test.each(['merge', 'pr', 'none'] as const)(
     expect(tracker.prs).toEqual([])
     expect(tracker.comments(1).slice(0, -1)).toEqual([])
     expect(tracker.isOpen(1)).toBe(true)
+    expect(existsSync(worktreeOf(clone))).toBe(true)
   },
 )
 
