@@ -21,7 +21,7 @@
   <img src="assets/readme/board.svg" alt="The groundhog board during a run: five tickets with their state, and the transcript of the running session" width="780">
 </p>
 
-groundhog is a local CLI that works through the tickets of a spec one by one, unattended. You give it the issue number of a spec. It answers a few questions up front, and then it runs [Claude Code](https://claude.com/claude-code) headless on one ticket after another.
+groundhog is a local CLI that works through the tickets of a spec one by one, unattended. You give it the issue number of a spec, or several to run one after another, or pick them from the ready specs. It answers a few questions up front, and then it runs [Claude Code](https://claude.com/claude-code) headless on one ticket after another.
 
 Agents don't judge their own work here. **groundhog's engine is plain code with no LLM in it.** It picks the next ticket, checks the result itself and decides alone whether a ticket is done.
 
@@ -76,6 +76,8 @@ You need:
 | **Linux only**                                    | `bubblewrap`, `socat` and `ripgrep` for the sandbox                    |
 
 groundhog runs on macOS and Linux. With the sandbox on, it refuses to start as `root`.
+
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md) and in the [GitHub releases](https://github.com/lucas-devries/groundhog/releases).
 
 ## Quick start
 
@@ -195,7 +197,7 @@ npm run fallow   # unused code, cycles, duplication, complexity
 
 The engine is tested from the outside, with real git against throwaway repos. Fakes stand in for the tracker, the agent, the clock and the sandbox. No test starts a real Claude session or calls GitHub.
 
-To make a release, run `npm version <x>` and push the tag. GitHub Actions runs the checks and publishes the package to npm, and `groundhog update` installs the newest version from there. The domain vocabulary is in [GLOSSARY.md](GLOSSARY.md).
+To make a release, add the changes to [CHANGELOG.md](CHANGELOG.md), run `npm version <x>` and push the commit and the tag. GitHub Actions runs the checks and publishes the package to npm, where `groundhog update` finds it. Then create the GitHub release for the tag, with the changelog section as its notes. The domain vocabulary is in [GLOSSARY.md](GLOSSARY.md).
 
 ## License
 

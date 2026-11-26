@@ -25,7 +25,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/testing"
+    "!dist/testing",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=24"
