@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380" role="img" aria-label="How groundhog works through a spec">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9198a1"/></marker><marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3fb950"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f85149"/></marker></defs>
+<rect width="960" height="380" rx="14" fill="#0d1117"/>
+<rect x="20" y="78" width="212" height="104" rx="12" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<circle cx="42" cy="101" r="10" fill="#e6edf3"/><text x="42" y="105" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d1117">1</text>
+<text x="60" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Pick the next ticket</text>
+<text x="36" y="130" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">Fresh from GitHub Issues:</text>
+<text x="36" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">open, ready-for-agent,</text>
+<text x="36" y="166" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">no open blocker, lowest #</text>
+<rect x="268" y="78" width="212" height="104" rx="12" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<circle cx="290" cy="101" r="10" fill="#e6edf3"/><text x="290" y="105" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d1117">2</text>
+<text x="308" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Run one session</text>
+<text x="284" y="130" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#9198a1">claude -p</text>
+<text x="284" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#9198a1">/mattpocock-skills:implement</text>
+<text x="284" y="166" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">inside an srt sandbox</text>
+<rect x="516" y="78" width="212" height="104" rx="12" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<circle cx="538" cy="101" r="10" fill="#e6edf3"/><text x="538" y="105" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d1117">3</text>
+<text x="556" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Verify</text>
+<text x="532" y="130" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">session succeeded</text>
+<text x="532" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">new commit, clean tree</text>
+<text x="532" y="166" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">every check exits 0</text>
+<rect x="760" y="78" width="180" height="104" rx="12" fill="#12261e" stroke="#3fb950" stroke-width="1.5"/>
+<text x="776" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Green</text>
+<text x="776" y="130" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#9198a1">one commit on spec/57</text>
+<text x="776" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">push, close ticket</text>
+<text x="776" y="166" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">comment with SHA</text>
+<rect x="516" y="250" width="212" height="88" rx="12" fill="#2d1517" stroke="#f85149" stroke-width="1.5"/>
+<text x="532" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Red</text>
+<text x="532" y="302" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">next attempt on the same</text>
+<text x="532" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">work, with the check output</text>
+<rect x="760" y="250" width="180" height="88" rx="12" fill="#2d1517" stroke="#f85149" stroke-width="1.5"/>
+<text x="776" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Out of attempts</text>
+<text x="776" y="302" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">ready-for-human + one</text>
+<text x="776" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">comment; carry on</text>
+<path d="M232 130.0 H264" fill="none" stroke="#9198a1" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M480 130.0 H512" fill="none" stroke="#9198a1" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M728 130.0 H756" fill="none" stroke="#3fb950" stroke-width="1.6" marker-end="url(#g)"/>
+<path d="M622.0 182 V246" fill="none" stroke="#f85149" stroke-width="1.6" marker-end="url(#r)"/>
+<path d="M516 294 H374.0 V186" fill="none" stroke="#f85149" stroke-width="1.6" marker-end="url(#r)"/>
+<path d="M728 294 H756" fill="none" stroke="#f85149" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#r)"/>
+<text x="736" y="120.0" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#3fb950">green</text>
+<text x="630.0" y="220" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#f85149">red</text>
+<text x="386.0" y="314" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#f85149">attempt 2 … n</text>
+<text x="738" y="284" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#f85149">last</text>
+<path d="M850 78 V40 H126.0 V74" fill="none" stroke="#9198a1" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="450.0" y="32" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">next ticket, task-graph read again</text>
+
+<text x="20" y="358" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#e6edf3">The engine decides. The agent only writes code and commits.</text>
+</svg>

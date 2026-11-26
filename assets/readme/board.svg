@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="783" height="524" viewBox="0 0 783 524" role="img" aria-label="groundhog 57">
+<rect width="783" height="524" rx="12" fill="#15171c"/>
+<rect x="0.5" y="0.5" width="782" height="523" rx="12" fill="none" stroke="#30363d"/>
+<circle cx="22" cy="20" r="6" fill="#ff5f57"/><circle cx="42" cy="20" r="6" fill="#febc2e"/><circle cx="62" cy="20" r="6" fill="#28c840"/>
+<text x="391.5" y="25" text-anchor="middle" fill="#7d8590" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">groundhog 57</text>
+<g font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">
+<text x="22" y="66" xml:space="preserve"><tspan fill="#7d8590">groundhog 1.0.0 · Spec #57 · target branch main · finish PR</tspan></text>
+<text x="22" y="104" xml:space="preserve"><tspan fill="#e6e8eb">  #58 </tspan><tspan fill="#3fb950">✔ done</tspan></text>
+<text x="22" y="123" xml:space="preserve"><tspan fill="#e6e8eb">  #59 </tspan><tspan fill="#3fb950">✔ done in attempt 2</tspan></text>
+<text x="22" y="142" xml:space="preserve"><tspan fill="#e6e8eb">  #60 </tspan><tspan fill="#39c5cf">▶ running · Attempt 1 of 3</tspan></text>
+<text x="22" y="161" xml:space="preserve"><tspan fill="#e6e8eb">  #61 </tspan><tspan fill="#7d8590">○ blocked by #60</tspan></text>
+<text x="22" y="180" xml:space="preserve"><tspan fill="#e6e8eb">  #62 </tspan><tspan fill="#7d8590">– ready-for-human, not touched</tspan></text>
+<text x="22" y="199" xml:space="preserve"><tspan fill="#7d8590">────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
+<text x="22" y="218" xml:space="preserve"><tspan fill="#e6e8eb">  │ I will add a theme toggle to the settings page, test first.</tspan></text>
+<text x="22" y="237" xml:space="preserve"><tspan fill="#e6e8eb">  │ </tspan><tspan fill="#39c5cf">●</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#e6e8eb" font-weight="700">Read</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#7d8590">src/settings/theme.ts</tspan></text>
+<text x="22" y="256" xml:space="preserve"><tspan fill="#e6e8eb">  │   </tspan><tspan fill="#7d8590">└ export type Theme = &quot;light&quot; | &quot;dark&quot;</tspan></text>
+<text x="22" y="275" xml:space="preserve"><tspan fill="#e6e8eb">  │ </tspan><tspan fill="#39c5cf">●</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#e6e8eb" font-weight="700">Edit</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#7d8590">src/settings/theme.ts</tspan></text>
+<text x="22" y="294" xml:space="preserve"><tspan fill="#e6e8eb">  │   </tspan><tspan fill="#7d8590">└ 4 lines added, 0 removed</tspan></text>
+<text x="22" y="313" xml:space="preserve"><tspan fill="#e6e8eb">  │     </tspan><tspan fill="#7d8590">   1  </tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#3fb950">export</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#3fb950">type</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#58a6ff">Theme</tspan><tspan fill="#e6e8eb"> = </tspan><tspan fill="#39c5cf">&quot;light&quot;</tspan><tspan fill="#e6e8eb"> | </tspan><tspan fill="#39c5cf">&quot;dark&quot;</tspan></text>
+<text x="22" y="332" xml:space="preserve"><tspan fill="#e6e8eb">  │     </tspan><tspan fill="#3fb950">   2 +</tspan><tspan fill="#e6e8eb"> </tspan></text>
+<text x="22" y="351" xml:space="preserve"><tspan fill="#e6e8eb">  │     </tspan><tspan fill="#3fb950">   3 +</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#3fb950">export</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#3fb950">function</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#58a6ff">toggle</tspan><tspan fill="#e6e8eb">(theme: Theme): </tspan><tspan fill="#58a6ff">Theme</tspan><tspan fill="#e6e8eb"> {</tspan></text>
+<text x="22" y="370" xml:space="preserve"><tspan fill="#e6e8eb">  │     </tspan><tspan fill="#3fb950">   4 +</tspan><tspan fill="#e6e8eb">   </tspan><tspan fill="#3fb950">return</tspan><tspan fill="#e6e8eb"> theme === </tspan><tspan fill="#39c5cf">&quot;light&quot;</tspan><tspan fill="#e6e8eb"> ? </tspan><tspan fill="#39c5cf">&quot;dark&quot;</tspan><tspan fill="#e6e8eb"> : </tspan><tspan fill="#39c5cf">&quot;light&quot;</tspan></text>
+<text x="22" y="389" xml:space="preserve"><tspan fill="#e6e8eb">  │     </tspan><tspan fill="#3fb950">   5 +</tspan><tspan fill="#e6e8eb"> }</tspan></text>
+<text x="22" y="408" xml:space="preserve"><tspan fill="#e6e8eb">  │ </tspan><tspan fill="#39c5cf">●</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#e6e8eb" font-weight="700">Bash</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#7d8590">npm test -- theme</tspan></text>
+<text x="22" y="427" xml:space="preserve"><tspan fill="#e6e8eb">  │   </tspan><tspan fill="#7d8590">└ Test Files 1 passed (1) Tests 4 passed (4)</tspan></text>
+<text x="22" y="446" xml:space="preserve"><tspan fill="#e6e8eb">  │ Tests are green. Committing, then running the code review.</tspan></text>
+<text x="22" y="465" xml:space="preserve"><tspan fill="#e6e8eb">  │ </tspan><tspan fill="#39c5cf">●</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#e6e8eb" font-weight="700">Bash</tspan><tspan fill="#e6e8eb"> </tspan><tspan fill="#7d8590">git commit -m &quot;Add a theme toggle to settings&quot;</tspan></text>
+<text x="22" y="484" xml:space="preserve"><tspan fill="#7d8590">────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
+<text x="22" y="503" xml:space="preserve"><tspan fill="#e6e8eb">#60 · Attempt 1 of 3</tspan></text>
+</g>
+</svg>
