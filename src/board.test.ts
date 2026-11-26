@@ -23,6 +23,7 @@ const started: Event = {
   type: 'run-started',
   spec: 25,
   choice: { targetBranch: 'main', finish: 'pr' },
+  worktree: '/worktrees/spec-25',
   versions: { groundhog: '1.2.3' },
   time: 0,
 }

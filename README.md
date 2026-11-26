@@ -47,7 +47,7 @@ It builds on the [Matt Pocock skills](https://github.com/mattpocock/skills). Aft
 2. **Session.** A fresh `claude -p "/mattpocock-skills:implement <ticket URL>"` runs on its own `ticket/<n>` branch, with a short AFK note: never ask back, test first, review, end with one commit.
 3. **Verify.** groundhog checks every condition itself and shows each result: the session succeeded, `HEAD` is on the ticket branch, there is a new commit, the tree is clean, and every check in `groundhog.json` exits 0.
 4. **Green.** The work lands on `spec/<n>` as one commit and gets pushed. The ticket is closed with a comment.
-5. **Red.** The next attempt continues on the same work and gets the output of the failed check. After the last attempt the work is discarded. The ticket gets `ready-for-human` and one comment that explains every attempt, including the `claude --resume` command. Tickets that depend on it stay blocked on their own, and everything else goes on.
+5. **Red.** The next attempt continues on the same work and gets the output of the failed check. After the last attempt the work is discarded. The ticket gets `ready-for-human` and one comment that explains every attempt, including the `cd <worktree> && claude --resume <id>` command. Tickets that depend on it stay blocked on their own, and everything else goes on.
 
 <p align="center">
   <picture>

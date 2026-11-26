@@ -119,6 +119,7 @@ test('state changes of the tickets, verifications, blocks and warnings appear as
         type: 'run-started',
         spec: 25,
         choice: { targetBranch: 'main', finish: 'pr' },
+        worktree: '/worktrees/spec-25',
         versions: { groundhog: '1.0.0', claude: '2.1.0' },
         time: at(1),
       },
@@ -202,6 +203,7 @@ const started = (finish: 'merge' | 'pr' | 'none'): Event => ({
   type: 'run-started',
   spec: 25,
   choice: { targetBranch: 'main', finish },
+  worktree: '/worktrees/spec-25',
   versions: {},
   time: 0,
 })

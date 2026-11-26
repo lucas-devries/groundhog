@@ -54,6 +54,8 @@ type RunEvent =
       type: 'run-started'
       spec: number
       choice: Choice
+      /** For the resume line in summary and comment. */
+      worktree: string
       versions: Record<string, string>
     }
   /** The task-graph, as the engine read it before each ticket and at the end. */
@@ -183,7 +185,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
     await comment(spec, `${text}\n\n${resumeInfo(input.logDir)}`)
     input.report?.({ ...ending, summary: text })
   }
-  report({ type: 'run-started', spec, choice, versions: input.versions ?? {} })
+  report({ type: 'run-started', spec, choice, worktree, versions: input.versions ?? {} })
 
   /** A failed removal only warns: it must not cost the summary. */
   const removeWorktree = () => {
@@ -423,6 +425,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
                 ? undefined
                 : truncateFromStart(red.output, 'truncated, full output in the log'),
             blocks: blocks.length,
+            worktree,
             sessionId,
             logDir: input.logDir,
           }),

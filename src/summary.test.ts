@@ -113,7 +113,7 @@ ${output}
 
 Blocks: 2
 
-- Session: \`claude --resume session-2-red\`
+- Session: \`cd ${worktreeOf(clone)} && claude --resume session-2-red\`
 - Machine: ${hostname()}
 - Log: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
@@ -180,7 +180,7 @@ test('the summary names the run and one line per ticket; the spec gets it as a c
 
 - #2 done · Attempts 2 of 3 · Pauses 0 · Duration 20 min · Blocks 1 · Commit ${git(remote, 'rev-parse', 'spec/1')}
   - Bash: \`curl https://example.com\`
-- #3 failed · Attempts 3 of 3 · Pauses 0 · Duration 30 min · Blocks 1 · red: Check: grep -sqx green green || { echo "not green"; false; } · \`claude --resume session-3-red\`
+- #3 failed · Attempts 3 of 3 · Pauses 0 · Duration 30 min · Blocks 1 · red: Check: grep -sqx green green || { echo "not green"; false; } · \`cd ${worktreeOf(clone)} && claude --resume session-3-red\`
   - WebFetch: \`https://x.org\`
 - #4 blocked by #3
 - #5 not touched
@@ -192,6 +192,18 @@ test('the summary names the run and one line per ticket; the spec gets it as a c
 - Machine: ${hostname()}
 - Log: \`/tmp/runs/20261125-220000-spec-1\``,
   ])
+})
+
+test('the resume line quotes a worktree path the shell would split', async () => {
+  const { clone } = throwawayRepo()
+  const worktree = `${clone} it's a worktree`
+  const tracker = new InMemoryTracker('me', [ticket(2)])
+
+  await run(clone, tracker, [red], { worktree, maxAttempts: 1 })
+
+  const resume = `\`cd '${clone} it'\\''s a worktree' && claude --resume session-2-red\``
+  expect(tracker.comments(2)[0]).toContain(`- Session: ${resume}`)
+  expect(tracker.comments(1)[0]).toContain(` · ${resume}`)
 })
 
 test('the summary counts pauses at the usage limit and shows a halted ticket as interrupted', async () => {
