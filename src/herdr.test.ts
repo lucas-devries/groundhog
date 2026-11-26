@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
-import type { Event } from './engine.ts'
 import { herdr, herdrAgent, herdrStart } from './herdr.ts'
+import type { Event } from './run-state.ts'
 import { frontierState, type Ticket } from './tracker.ts'
 
 const ticket = (number: number, open = true): Ticket => ({

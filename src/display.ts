@@ -2,8 +2,9 @@ import { hostname } from 'node:os'
 import { extname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { common, createEmphasize } from 'emphasize'
+import { FINISH } from './choice.ts'
 import { type Hunk, keyArgument, readStreamLine } from './claude.ts'
-import { type Event, FINISH, integrationBranch } from './engine.ts'
+import { type Event, fold, newRunState } from './run-state.ts'
 import { truncateFromStart } from './summary.ts'
 
 export interface DisplayOptions {
@@ -37,12 +38,10 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
     return l.length > n ? `${l.slice(0, n - 1)}…` : l
   }
 
-  let started: Extract<Event, { type: 'run-started' }> | undefined
-  let integration = ''
-  let integrated = 0
-  let head: string | undefined
+  const state = newRunState()
 
   return (e) => {
+    fold(state, e)
     switch (e.type) {
       case 'session-output':
         return transcript(e.line).flatMap((t) => {
@@ -61,8 +60,6 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
           return diff(t, width - 6, s).map((l) => `  │   ${l}`)
         })
       case 'run-started': {
-        started = e
-        integration = integrationBranch(e.spec)
         const version = e.versions.groundhog ? ` ${e.versions.groundhog}` : ''
         const finish = FINISH[e.choice.finish]
         const { position } = options
@@ -87,11 +84,8 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
       case 'pause':
         return [s.yellow(`  ⏸ Usage limit reached, pause until ${timeOfDay(e.reset, e.time)}`)]
       case 'push':
-        // The finish pushes to the target branch too; the head only tracks the integration branch.
-        if (e.branch === integration) head = e.commit
         return [s.dim(`  ↑ ${e.branch} pushed: ${e.commit.slice(0, 7)}`)]
       case 'ticket-done':
-        integrated++
         return [
           `${s.green('✔')} ${s.bold(`#${e.ticket} done`)}${e.attempts > 1 ? ` in attempt ${e.attempts}` : ''} · commit ${e.commit.slice(0, 7)}`,
         ]
@@ -117,6 +111,8 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
           ),
         ]
       case 'run-finished': {
+        const { started, integration, head } = state
+        const integrated = [...state.tickets.values()].filter((t) => t.status === 'done').length
         const spec = started?.spec
         const target = started?.choice.targetBranch
         const choice = `Finish ${started ? FINISH[started.choice.finish] : ''}`

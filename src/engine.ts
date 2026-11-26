@@ -1,15 +1,25 @@
-import type { Agent, SessionResult } from './agent.ts'
+import type { Agent } from './agent.ts'
 import { type Choice, integrationBranch } from './choice.ts'
 import { type Clock, MINUTE } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
 import { git } from './git.ts'
+import {
+  type CommandOutput,
+  type Event,
+  type FinishResult,
+  fold,
+  newRunState,
+  type RunEvent,
+  type TicketEvent,
+} from './run-state.ts'
 import type { Sandbox } from './sandbox.ts'
 import { resumeInfo, summary } from './summary.ts'
 import { type RunContext, ticketFlow } from './ticket-flow.ts'
-import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
+import { frontierState, type Tracker } from './tracker.ts'
 import { prepareWorktree } from './worktree.ts'
 
 export { type Choice, FINISH, integrationBranch } from './choice.ts'
+export type { Event, FinishResult } from './run-state.ts'
 
 export interface RunInput {
   spec: number
@@ -38,61 +48,6 @@ export interface RunInput {
   abort?: AbortSignal
 }
 
-export type Event = (RunEvent | TicketEvent) & { time: number }
-
-export type RunEvent =
-  | {
-      type: 'run-started'
-      spec: number
-      choice: Choice
-      /** For the resume line in summary and comment. */
-      worktree: string
-      versions: Record<string, string>
-    }
-  /** The task-graph, as the engine read it before each ticket and at the end. */
-  | { type: 'task-graph'; tickets: GraphTicket[] }
-  | { type: 'push'; branch: string; commit: string }
-  /** `summary` as Markdown; the log stores it as `summary.md`. */
-  | { type: 'run-finished'; finish: FinishResult; summary: string }
-  | { type: 'warning'; text: string }
-  /** `setup` failed, before any ticket. */
-  | ({ type: 'run-halted'; reason: 'setup' } & CommandOutput)
-
-export type TicketEvent = { ticket: number } & (
-  | { type: 'ticket-taken' }
-  | { type: 'attempt-started'; attempt: number; of: number }
-  /** Pause at the usage limit; `reset` is the reset time in ms, without buffer. */
-  | { type: 'pause'; reset: number }
-  /** At the usage limit without a reset time: it only goes on with credit. */
-  | { type: 'run-halted'; reason: 'credit' }
-  /** A line of the session's raw output, filtered. */
-  | { type: 'session-output'; session: number; line: string }
-  /** `session` counts sessions per ticket in the run, not attempts. */
-  | ({ type: 'session-finished'; session: number; attempt: number } & SessionResult)
-  /** `command` and `output` only for checks; the output untruncated, filtered. */
-  | { type: 'verification'; name: string; ok: boolean; command?: string; output?: string }
-  /** Every verification of the attempt up to the first red one, in order. */
-  | { type: 'attempt-finished'; attempt: number; verifications: VerificationResult[] }
-  | { type: 'ticket-done'; commit: string; attempts: number }
-  | { type: 'ticket-failed'; attempts: number; verification: string }
-)
-
-/** A command of the project config and its output, filtered. */
-export interface CommandOutput {
-  command: string
-  output: string
-}
-
-/** A ticket in the task-graph, with the state the engine gives it by the frontier rule. */
-export interface GraphTicket extends Ticket {
-  state: FrontierState
-}
-
-export interface VerificationResult {
-  name: string
-  ok: boolean
-}
-
 export interface TicketResult {
   number: number
   result: 'done' | 'failed'
@@ -102,14 +57,6 @@ export interface TicketResult {
   /** The red verification of the last attempt, only when failed. */
   verification?: string
 }
-
-/** What became of the finish. */
-export type FinishResult =
-  | { type: 'merged'; commit: string }
-  | { type: 'conflict' }
-  | { type: 'pr'; url: string }
-  | { type: 'none' }
-  | { type: 'skipped'; reason: 'tickets open' | 'setup failed' | 'aborted' }
 
 export interface RunResult {
   tickets: TicketResult[]
@@ -125,11 +72,11 @@ const SETUP_TIME_LIMIT = 15 * MINUTE
 export async function driveRun(input: RunInput): Promise<RunResult> {
   const { spec, choice, worktree, tracker, clock, maxAttempts = DEFAULT_ATTEMPTS } = input
   const abort = input.abort ?? new AbortController().signal
-  /** What the summary needs: all events without the raw output of the sessions. */
-  const history: Event[] = []
+  /** What the summary needs. */
+  const state = newRunState()
   const report = (e: RunEvent | TicketEvent) => {
     const event = { ...e, time: clock.now() }
-    if (event.type !== 'session-output') history.push(event)
+    fold(state, event)
     input.report?.(event)
   }
   // The one place where the token disappears from session, check and setup output. The agent only
@@ -148,18 +95,21 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
       })
     }
   }
+  /** The end event of the run with its summary, which needs the end already in the state. */
+  const finishedEvent = (finish: FinishResult) => {
+    const event = { type: 'run-finished', finish, summary: '', time: clock.now() } as const
+    return { ...event, summary: summary(fold(state, event)) }
+  }
   /** Regular end: summary to the spec and into the end event. */
   const end = async (finish: FinishResult) => {
-    const ending = { type: 'run-finished', finish, time: clock.now() } as const
-    const text = summary([...history, { ...ending, summary: '' }])
-    await comment(spec, `${text}\n\n${resumeInfo(input.logDir)}`)
-    input.report?.({ ...ending, summary: text })
+    const event = finishedEvent(finish)
+    await comment(spec, `${event.summary}\n\n${resumeInfo(input.logDir)}`)
+    input.report?.(event)
   }
   /** Orderly abort: no comment on the spec. */
   const aborted = (): RunResult => {
     const finish: FinishResult = { type: 'skipped', reason: 'aborted' }
-    const ending = { type: 'run-finished', finish, time: clock.now() } as const
-    input.report?.({ ...ending, summary: summary([...history, { ...ending, summary: '' }]) })
+    input.report?.(finishedEvent(finish))
     return { ...result, finish, halted: 'aborted' }
   }
   report({ type: 'run-started', spec, choice, worktree, versions: input.versions ?? {} })

@@ -1,14 +1,9 @@
 import type { Block, SessionResult } from './agent.ts'
 import { integrationBranch, ticketBranchOf } from './choice.ts'
 import { MINUTE } from './clock.ts'
-import type {
-  CommandOutput,
-  RunEvent,
-  RunInput,
-  TicketEvent,
-  VerificationResult,
-} from './engine.ts'
+import type { RunInput } from './engine.ts'
 import { branchExists, git } from './git.ts'
+import type { CommandOutput, RunEvent, TicketEvent, VerificationResult } from './run-state.ts'
 import { failedComment, truncateFromStart } from './summary.ts'
 import type { Ticket } from './tracker.ts'
 

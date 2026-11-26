@@ -1,4 +1,4 @@
-import type { Event } from './engine.ts'
+import { type Event, fold, newRunState } from './run-state.ts'
 
 /**
  * Reports the run to Herdr (herdr.dev) as agent `groundhog`, so the pane shows up in its agent
@@ -44,22 +44,15 @@ export function herdr(
   isTerminal: boolean,
 ): (e: Event) => string | undefined {
   if (!env.HC_TERMINAL_ID || !isTerminal) return () => undefined
-  let spec = 0
-  let progress = 0
-  let failed = false
+  const state = newRunState()
   return (e) => {
-    if (e.type === 'run-started') {
-      spec = e.spec
-      return osc('working', `Spec #${spec}`, progress)
-    }
-    if (e.type === 'ticket-failed') failed = true
-    if (e.type === 'task-graph') {
-      const closed = e.tickets.filter((t) => !t.open).length
-      progress = e.tickets.length ? Math.round((closed / e.tickets.length) * 100) : 100
-    }
+    const { started, progress, tickets } = fold(state, e)
+    const spec = `Spec #${started?.spec ?? 0}`
+    if (e.type === 'run-started') return osc('working', spec, progress)
     if (e.type === 'ticket-taken') return osc('working', `Ticket #${e.ticket}`, progress)
-    if (e.type === 'run-finished') return osc(failed ? 'error' : 'done', `Spec #${spec}`, progress)
-    return undefined
+    if (e.type !== 'run-finished') return undefined
+    const failed = [...tickets.values()].some((t) => t.status === 'failed')
+    return osc(failed ? 'error' : 'done', spec, progress)
   }
 }
 
