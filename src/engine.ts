@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
+import { realpathSync, rmSync } from 'node:fs'
 import type { Agent, Block, SessionResult } from './agent.ts'
 import type { Clock } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
-import { git } from './git.ts'
+import { commonDir, git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import { failedComment, resumeInfo, summary } from './summary.ts'
 import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
@@ -168,7 +168,11 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   }
   report({ type: 'run-started', spec, choice, versions: input.versions ?? {} })
 
-  if (!existsSync(worktree)) git(input.directory, 'worktree', 'add', '-q', '--detach', worktree)
+  if (!isWorktreeOf(input.directory, worktree)) {
+    rmSync(worktree, { recursive: true, force: true })
+    // -f twice also replaces a stale registration of this path, even a locked one.
+    git(input.directory, 'worktree', 'add', '-q', '-f', '-f', '--detach', worktree)
+  }
   /** Throws away the work in the worktree; everything there is the agent's. */
   const discard = () => {
     git(worktree, 'reset', '-q', '--hard')
@@ -498,6 +502,23 @@ async function doFinish(
     case 'none':
       await comment(spec, `Integration branch: ${integration}`)
       return { type: 'none' }
+  }
+}
+
+/**
+ * Whether the folder is a working worktree of the clone. Anything else must not be handed to
+ * `reset` or `clean`: git would then act on whatever repo lies above it.
+ */
+function isWorktreeOf(clone: string, folder: string): boolean {
+  try {
+    return (
+      git(folder, 'rev-parse', '--show-toplevel') === realpathSync(folder) &&
+      realpathSync(commonDir(folder)) === realpathSync(commonDir(clone))
+    )
+  } catch {
+    // Usually no folder or no repo there. Any other git error replaces the folder too, which
+    // costs nothing: all it holds is the agent's (ADR 0001).
+    return false
   }
 }
 

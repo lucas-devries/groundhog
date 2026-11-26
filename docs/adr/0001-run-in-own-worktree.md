@@ -13,4 +13,5 @@ A run used to check out its branches in the human's own working directory, so no
 
 - A fresh worktree has no ignored files such as `node_modules`, so the project config gets a `setup` command that runs once after the worktree is created.
 - Every leftover in the worktree is the agent's work, so a new run discards it without asking.
+- The same holds for the whole worktree path: a folder there that is not a worktree of the clone is deleted and replaced, and a stale registration of the path is overridden, even a locked one.
 - The lock stays one per clone: a run still claims the whole clone, only the human gets their working directory back.

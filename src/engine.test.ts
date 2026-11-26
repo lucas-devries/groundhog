@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { type AgentScript, fakeAgent, type SessionRequest } from './agent.ts'
@@ -16,13 +16,14 @@ async function run(
   script: AgentScript[],
   checks = ['true'],
   attempts?: number,
+  worktree = worktreeOf(directory),
 ): Promise<Event[]> {
   const events: Event[] = []
   await driveRun({
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory,
-    worktree: worktreeOf(directory),
+    worktree,
     checks,
     maxAttempts: attempts,
     tracker,
@@ -481,4 +482,62 @@ test('a second run reuses the worktree and discards a leftover change without as
     'Implement ticket 3\nImplement ticket 2\nignore\ninit',
   )
   expect(git(clone, 'rev-parse', 'spec/1')).toBe(git(remote, 'rev-parse', 'spec/1'))
+})
+
+test('a worktree folder deleted by hand is created again, even if git has it locked', async () => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  git(clone, 'worktree', 'add', '-q', '--detach', worktree)
+  git(clone, 'worktree', 'lock', worktree)
+  rmSync(worktree, { recursive: true })
+
+  await run(clone, oneTicket(), [commits])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+})
+
+test.each([
+  ['a plain folder', () => {}],
+  ['a repo of its own', (folder: string) => git(folder, 'init', '-q')],
+])('%s at the path of the worktree is replaced by a fresh worktree', async (_name, prepare) => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  mkdirSync(worktree)
+  writeFileSync(join(worktree, 'unknown.txt'), 'x')
+  prepare(worktree)
+
+  await run(clone, secondTicket(), [
+    ({ directory }) => {
+      commitFile(directory, 'b.txt', 'b', 'Implement ticket 3')
+      return { success: true }
+    },
+  ])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 3\ninit')
+  // Every ticket is closed, so the run removed the worktree it added.
+  expect(existsSync(worktree)).toBe(false)
+})
+
+test('a folder git lists as the worktree but that lost its .git file is replaced', async () => {
+  const { remote, clone } = throwawayRepo()
+  const worktree = worktreeOf(clone)
+  git(clone, 'worktree', 'add', '-q', '--detach', worktree)
+  rmSync(join(worktree, '.git'))
+
+  await run(clone, oneTicket(), [commits])
+
+  expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
+})
+
+test('an unknown folder inside another repo is replaced without touching that repo', async () => {
+  const { clone } = throwawayRepo()
+  const outer = throwawayRepo().clone
+  const worktree = join(outer, 'worktree')
+  mkdirSync(worktree)
+  writeFileSync(join(outer, 'README.md'), 'half-finished')
+
+  await run(clone, oneTicket(), [commits], undefined, undefined, worktree)
+
+  expect(readFileSync(join(outer, 'README.md'), 'utf8')).toBe('half-finished')
+  expect(git(outer, 'branch', '--show-current')).toBe('main')
 })
