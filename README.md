@@ -84,7 +84,7 @@ groundhog runs on macOS and Linux. With the sandbox on, it refuses to start as `
 groundhog init
 ```
 
-`init` asks for your checks, the target branches, extra hosts for the sandbox, and the number of attempts. In a Node project it suggests the checks. The only file it writes is `groundhog.json`. Then it asks whether to commit it now (default: Yes). On Yes, it makes a local commit on the current branch that contains only `groundhog.json`, and pushes nothing. On No, commit the file yourself before you start a run.
+`init` asks for your checks, the target branches, extra hosts for the sandbox, and the number of attempts. In a Node project it suggests the checks. The only file it writes is `groundhog.json`. Then it asks whether to commit it now (default: Yes). On Yes, it makes a local commit on the current branch that contains only `groundhog.json`, and pushes nothing. On No, commit the file yourself before you start a run. If the file does not differ from the committed one, there is no question. If git refuses the commit, `init` shows its error and exits with `1`; Ctrl+C at this question exits with `130`. In both cases the file stays written.
 
 **2. Prepare a spec.** The spec is a GitHub issue. Its tickets are native **sub-issues**, and their order comes from native **issue dependencies** ("blocked by"). Label the tickets the agent may take `ready-for-agent`. `/to-spec` and `/to-tickets` from the Matt Pocock skills produce exactly this.
 
