@@ -350,7 +350,16 @@ test('without a newer version the menu does not ask about the update', async () 
 })
 
 test('a dirty working tree does not abort the start and stays as it is', async () => {
-  const { clone, path } = ready()
+  // ticket/7 is no ticket of spec #25; only the task graph can tell.
+  const { clone, path } = ready({
+    gh: [
+      GH_VERSION,
+      TOKEN,
+      USER,
+      recording('start-check-spec-25.json'),
+      recording('task-graph-spec-25.json'),
+    ],
+  })
   git(clone, 'checkout', '-q', '-b', 'ticket/7')
   writeFileSync(join(clone, 'new.txt'), 'x')
 
@@ -387,6 +396,70 @@ test('the worktree lies in the cache, at the same path from the clone and from a
   expect(await worktree(ready().clone)).not.toBe(fromClone)
   expect(existsSync(fromClone)).toBe(false)
 })
+
+test('spec/25 checked out in the clone aborts the start and nothing changes', async () => {
+  const { clone, path } = ready()
+  git(clone, 'checkout', '-q', '-b', 'spec/25')
+  const refs = git(clone, 'for-each-ref')
+
+  const { result, shown } = await run({ clone, path }, [])
+
+  expect(result).toEqual({
+    ok: false,
+    exitCode: 1,
+    message: `spec/25 is checked out in ${realpathSync(clone)}; switch away first.`,
+  })
+  expect(shown).toEqual([])
+  expect(git(clone, 'branch', '--show-current')).toBe('spec/25')
+  expect(git(clone, 'for-each-ref')).toBe(refs)
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test('a ticket branch of the spec checked out in another worktree aborts the start', async () => {
+  const { clone, path } = ready()
+  const own = `${clone}-own`
+  git(clone, 'worktree', 'add', '-q', own, '-b', 'ticket/26')
+
+  const { result, shown } = await run({ clone, path }, [])
+
+  expect(result).toEqual({
+    ok: false,
+    exitCode: 1,
+    message: `ticket/26 is checked out in ${realpathSync(own)}; switch away first.`,
+  })
+  expect(shown).toEqual([])
+  expect(git(own, 'branch', '--show-current')).toBe('ticket/26')
+  expect(existsSync(lock(clone))).toBe(false)
+})
+
+test.each([
+  { folder: 'there', gone: false },
+  // For example a cleared cache; git still lists the worktree.
+  { folder: 'gone', gone: true },
+])(
+  'spec/25 in the run’s own worktree does not abort the start, folder $folder',
+  async ({ gone }) => {
+    // A home behind a symlink: git lists the real path of the worktree.
+    const home = `${mkdtempSync(join(tmpdir(), 'home-'))}-link`
+    symlinkSync(mkdtempSync(join(tmpdir(), 'home-')), home)
+    vi.stubEnv('HOME', home)
+    const first = ready()
+    const earlier = await run(first, ['main', 'pr'])
+    if (!earlier.result.ok) throw new Error(earlier.result.message)
+    earlier.result.release()
+    // Two starts within one second would share the log folder name.
+    rmSync(earlier.result.log.path, { recursive: true })
+    const own = earlier.result.worktree(25)
+    git(first.clone, 'worktree', 'add', '-q', own, '-b', 'spec/25')
+    if (gone) rmSync(own, { recursive: true })
+    // Again, because `run` removes every stub.
+    vi.stubEnv('HOME', home)
+
+    const { result } = await run({ clone: first.clone, path: ready().path }, ['main', 'pr'])
+
+    expect(result.ok).toBe(true)
+  },
+)
 
 test('integration and ticket branches of an earlier run on the remote do not get in the way of the start', async () => {
   const { clone, path } = ready()

@@ -126,6 +126,10 @@ export function integrationBranch(spec: number): string {
   return `spec/${spec}`
 }
 
+export function ticketBranchOf(ticket: number): string {
+  return `ticket/${ticket}`
+}
+
 /** Thrown by the engine at the places where it accepts an abort. */
 class Aborted extends Error {}
 
@@ -226,7 +230,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         return { ...result, finish }
       }
       const nr = ticket.number
-      const ticketBranch = `ticket/${nr}`
+      const ticketBranch = ticketBranchOf(nr)
 
       await tracker.claim(nr)
       taken = nr
@@ -427,7 +431,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   discard()
   git(worktree, 'checkout', '-q', '-f', integration)
   if (taken !== undefined) {
-    deleteTicketBranch(worktree, `ticket/${taken}`)
+    deleteTicketBranch(worktree, ticketBranchOf(taken))
     await tracker.release(taken)
   }
   const finish: FinishResult = { type: 'skipped', reason: 'aborted' }

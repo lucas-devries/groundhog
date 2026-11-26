@@ -95,7 +95,7 @@ groundhog init
 groundhog 57
 ```
 
-Before it touches anything, groundhog checks the tools, logins, skills and the sandbox. A dirty working tree is fine. Then it asks everything at once: the target branch and the finish (merge, PR or nothing). It asks for confirmation once more if you choose to merge straight into `main`. After that, it needs no more input.
+Before it touches anything, groundhog checks the tools, logins, skills and the sandbox. A dirty working tree is fine. But git checks out a branch in only one worktree at a time. So if `spec/<n>` or a `ticket/<n>` branch of the spec is checked out anywhere but in the run's own worktree, your directory included, groundhog names the branch and the directory and aborts. Switch away and start again; groundhog never switches your branch. Then it asks everything at once: the target branch and the finish (merge, PR or nothing). It asks for confirmation once more if you choose to merge straight into `main`. After that, it needs no more input.
 
 ### The run's worktree
 
