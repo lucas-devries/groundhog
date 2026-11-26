@@ -28,7 +28,7 @@ _Avoid_: Queue, ready list
 
 **Tracker**:
 The place where a spec and its tickets live. It is the single source of truth for the task-graph; the engine keeps no copy of its own.
-_Avoid_: Board, Backlog
+_Avoid_: Project board, Backlog
 
 **Run**:
 One execution of the engine over a spec, from the start until no ticket can be implemented any more.
@@ -49,6 +49,10 @@ _Avoid_: system prompt, extra prompt, AFK-Hinweis (former German term)
 **Transcript**:
 The continuous display of what the agent does in a session. A human can read it but cannot intervene in the session.
 _Avoid_: Log, Stream, Mitschrift (former German term)
+
+**Board**:
+The fixed screen of a run in a terminal: at the top the state of the tickets, at the bottom the transcripts of the run's sessions, which a human can scroll back through.
+_Avoid_: Dashboard, TUI, Tafel (former German term)
 
 **Log**:
 Everything a run keeps on the machine for good, so that a human can trace it afterwards.
