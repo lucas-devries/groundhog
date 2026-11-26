@@ -1,8 +1,11 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 import { readStreamLine, type StreamLine } from './claude.ts'
 import { type Config, readConfig } from './config.ts'
 import { type Choice, type Event, FINISH, integrationBranch } from './engine.ts'
-import { git } from './git.ts'
+import { commonDir, git } from './git.ts'
 import { GitHubTracker } from './github.ts'
 import { takeLock } from './lock.ts'
 import { type Log, openLog } from './log.ts'
@@ -63,6 +66,8 @@ export interface Ready {
   /** Repo root of the clone. */
   directory: string
   config: Config
+  /** The path of the worktree the run of a spec works in; the engine creates it. */
+  worktree: (spec: number) => string
   /** The batch in the order it runs. */
   specs: number[]
   /** Target branch and finish, the same for every run of the batch. */
@@ -144,25 +149,6 @@ export async function start({
     if (!lock.ok) throw new Abort(lock.message)
     release = lock.release
 
-    if (git(directory, 'status', '--porcelain') !== '') {
-      // Exception: the remnant of an aborted run on ticket/<n>.
-      const remnant = git(directory, 'branch', '--show-current').match(/^ticket\/(\d+)$/)?.[1]
-      const discard =
-        remnant !== undefined &&
-        isTerminal &&
-        (await dialog.confirm({
-          message: `Discard the remnant of ticket ${remnant}?`,
-          initialValue: false,
-          active: 'Yes',
-          inactive: 'No',
-        }))
-      if (typeof discard === 'symbol') throw new Abort(NOTHING_CHANGED, 130)
-      if (!discard) {
-        throw new Abort('The working tree is not clean. Commit or discard the changes.')
-      }
-      git(directory, 'reset', '-q', '--hard')
-      git(directory, 'clean', '-q', '-fd')
-    }
     git(directory, 'fetch', '-q', '--prune', 'origin')
     // Exactly the names spec and ticket; spec/<n> and ticket/<n> of earlier runs are no obstacle.
     const inTheWay = git(
@@ -195,7 +181,7 @@ export async function start({
           `The sandbox is on but does not start:\n${what.map((w) => `- ${w}`).join('\n')}`,
         )
       }
-      sandbox = srtSandbox(config.sandbox.hosts)
+      sandbox = srtSandbox(config.sandbox.hosts, commonDir(directory))
     }
 
     const missingSkills = skills(directory, versions)
@@ -264,6 +250,7 @@ export async function start({
       ok: true,
       directory,
       config,
+      worktree: worktrees(directory),
       specs,
       choice,
       tracker,
@@ -279,6 +266,20 @@ export async function start({
     const exitCode = error instanceof Abort ? error.exitCode : 1
     return { ok: false, exitCode, message: (error as Error).message }
   }
+}
+
+/**
+ * Where the worktrees of a clone lie, outside the repo (ADR 0001). The hash of the shared git
+ * directory keeps two clones apart and gives every worktree of one clone the same folder.
+ */
+function worktrees(directory: string): (spec: number) => string {
+  // The first line is `worktree <path>` of the main worktree, wherever git is asked from.
+  const [first = ''] = git(directory, 'worktree', 'list', '--porcelain').split('\n')
+  const main = first.replace(/^worktree /, '')
+  const hash = createHash('sha256').update(commonDir(directory)).digest('hex').slice(0, 8)
+  const folder = `${basename(main)}-${hash}`
+  const root = join(homedir(), '.cache/groundhog/worktrees', folder)
+  return (spec) => join(root, `spec-${spec}`)
 }
 
 /** Runs a tool and returns stdout; if it is missing in the `PATH`, the start aborts. */

@@ -2,7 +2,7 @@ import type { Ticket } from './tracker.ts'
 
 export interface SessionRequest {
   ticket: Ticket
-  /** Repo root, checked out on the ticket branch. */
+  /** The run's worktree, checked out on the ticket branch. */
   directory: string
   /** SHA where the ticket branch forks off. */
   forkPoint: string

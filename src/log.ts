@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Event } from './engine.ts'
-import { git } from './git.ts'
+import { commonDir } from './git.ts'
 
 /** This many runs stay in the log per clone, the new one included. */
 const KEEP = 10
@@ -27,8 +27,7 @@ export function openLog(options: {
   next?: (event: Event) => void
 }): Log {
   const { directory, spec, start, next } = options
-  const gitDir = resolve(directory, git(directory, 'rev-parse', '--git-common-dir'))
-  const runs = join(gitDir, 'groundhog', 'runs')
+  const runs = join(commonDir(directory), 'groundhog', 'runs')
   const path = join(runs, `${timestamp(new Date(start))}-spec-${spec}`)
   mkdirSync(runs, { recursive: true })
   mkdirSync(path)

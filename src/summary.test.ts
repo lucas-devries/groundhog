@@ -5,7 +5,7 @@ import { manualClock } from './clock.ts'
 import { driveRun, type Event, type RunInput } from './engine.ts'
 import { git } from './git.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
 const START = new Date(2026, 10, 25, 22, 0, 0).getTime()
@@ -33,6 +33,7 @@ async function run(
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory: clone,
+    worktree: worktreeOf(clone),
     checks: ['grep -sqx green green || { echo "not green"; false; }'],
     logDir: '/tmp/runs/20261125-220000-spec-1',
     tracker,

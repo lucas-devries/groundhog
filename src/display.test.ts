@@ -6,7 +6,7 @@ import { manualClock } from './clock.ts'
 import { display } from './display.ts'
 import { driveRun, type Event, type FinishResult } from './engine.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 /** What the display writes without a terminal for a sequence of events. */
@@ -273,6 +273,7 @@ test('a real session, reported through the engine, appears continuously without 
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory: clone,
+    worktree: worktreeOf(clone),
     checks: ['true'],
     tracker: new InMemoryTracker('me', [
       { number: 2, open: true, labels: ['ready-for-agent'], assignees: [], blockers: [] },

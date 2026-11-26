@@ -7,7 +7,7 @@ import { manualClock } from './clock.ts'
 import { driveRun, type Event, type RunResult } from './engine.ts'
 import { git } from './git.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 const twoTickets = () =>
@@ -34,6 +34,7 @@ function setup(tracker = twoTickets()) {
       spec: 1,
       choice: { targetBranch: 'main', finish: 'none' },
       directory: clone,
+      worktree: worktreeOf(clone),
       checks: ['true'],
       maxAttempts: attempts,
       tracker,
@@ -75,6 +76,8 @@ function expectCleanedUp(
   expect(tracker.ticket(2)).toMatchObject({ open: true, assignees: [] })
   expect(git(clone, 'status', '--porcelain')).toBe('')
   expect(git(clone, 'branch', '--show-current')).toBe('main')
+  expect(git(worktreeOf(clone), 'status', '--porcelain')).toBe('')
+  expect(git(worktreeOf(clone), 'branch', '--show-current')).toBe('spec/1')
   expect(git(clone, 'branch', '--list', 'ticket/*')).toBe('')
   expect(git(remote, 'branch', '--list', 'ticket/*')).toBe('')
   expect(tracker.comments(1)).toEqual([])
@@ -166,14 +169,16 @@ test('Ctrl+C during cleanup aborts at once', async () => {
   expect(a.hardEnds()).toBe(1)
 })
 
-test('the abort checks out the branch that was checked out at the start', async () => {
+test('an abort leaves the human’s clone on its branch with uncommitted work', async () => {
   const { clone } = throwawayRepo()
   git(clone, 'checkout', '-q', '-b', 'own')
+  writeFileSync(join(clone, 'new.txt'), 'x')
   const a = setup()
 
   await a.run(clone, [interrupted(() => a.guard.receive('SIGTERM'))])
 
   expect(git(clone, 'branch', '--show-current')).toBe('own')
+  expect(git(clone, 'status', '--porcelain')).toBe('?? new.txt')
 })
 
 test('a new run after an abort starts each ticket with attempt 1', async () => {

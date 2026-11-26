@@ -6,7 +6,7 @@ import { manualClock } from './clock.ts'
 import { driveRun, type Event } from './engine.ts'
 import { openLog } from './log.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker } from './tracker.ts'
 
 const START = new Date(2026, 10, 25, 3, 4, 5).getTime()
@@ -30,6 +30,7 @@ async function run(
     spec: 1,
     choice: { targetBranch: 'main', finish: 'none' },
     directory: clone,
+    worktree: worktreeOf(clone),
     checks,
     token,
     versions: { groundhog: '1.0.0', claude: '2.1.0', skills: '1.3.2' },

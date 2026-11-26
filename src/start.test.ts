@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { git } from './git.ts'
@@ -349,54 +349,43 @@ test('without a newer version the menu does not ask about the update', async () 
   expect(shown[0]).toMatchObject({ kind: 'note', title: 'This run' })
 })
 
-/** Remnant of an aborted run: `HEAD` on ticket/7, optionally with a dirty working tree. */
-function ticketRemnant(clone: string, dirty: boolean) {
+test('a dirty working tree does not abort the start and stays as it is', async () => {
+  const { clone, path } = ready()
   git(clone, 'checkout', '-q', '-b', 'ticket/7')
-  commitFile(clone, 'half.txt', 'x', 'half done')
-  if (dirty) {
-    writeFileSync(join(clone, 'half.txt'), 'y')
-    writeFileSync(join(clone, 'new.txt'), 'x')
-  }
-}
-
-test('dirty ticket/* remnant: Yes to "Discard the remnant of ticket n?" cleans up, then the menu follows', async () => {
-  const { clone, path } = ready()
-  ticketRemnant(clone, true)
-
-  const { result, shown } = await run({ clone, path }, [true, 'main', 'pr'])
-
-  expect(result.ok).toBe(true)
-  expect(shown[0]).toEqual({
-    kind: 'confirm',
-    message: 'Discard the remnant of ticket 7?',
-    initialValue: false,
-    active: 'Yes',
-    inactive: 'No',
-  })
-  expect(shown[1]).toMatchObject({ kind: 'note', title: 'This run' })
-  expect(git(clone, 'status', '--porcelain')).toBe('')
-})
-
-test('dirty ticket/* remnant: No aborts without changing anything', async () => {
-  const { clone, path } = ready()
-  ticketRemnant(clone, true)
-  const status = git(clone, 'status', '--porcelain')
-
-  const { result } = await run({ clone, path }, [false])
-
-  expect(result).toMatchObject({ ok: false, exitCode: 1 })
-  expect(git(clone, 'status', '--porcelain')).toBe(status)
-  expect(existsSync(lock(clone))).toBe(false)
-})
-
-test('clean ticket/* remnant: the run starts without asking', async () => {
-  const { clone, path } = ready()
-  ticketRemnant(clone, false)
+  writeFileSync(join(clone, 'new.txt'), 'x')
 
   const { result, shown } = await run({ clone, path }, ['main', 'pr'])
 
   expect(result.ok).toBe(true)
+  // No question before the menu.
   expect(shown[0]).toMatchObject({ kind: 'note', title: 'This run' })
+  expect(git(clone, 'status', '--porcelain')).toBe('?? new.txt')
+  expect(git(clone, 'branch', '--show-current')).toBe('ticket/7')
+})
+
+test('the worktree lies in the cache, at the same path from the clone and from a worktree of it', async () => {
+  const first = ready()
+  const own = `${first.clone}-own`
+  git(first.clone, 'worktree', 'add', '-q', own, '-b', 'own')
+  const worktree = async (directory: string) => {
+    const { path } = ready()
+    const { result } = await run({ clone: directory, path }, ['main', 'pr'])
+    if (!result.ok) throw new Error(result.message)
+    result.release()
+    // Two starts within one second would share the log folder name.
+    rmSync(result.log.path, { recursive: true })
+    return result.worktree(25)
+  }
+
+  const fromClone = await worktree(first.clone)
+
+  const root = join(homedir(), '.cache/groundhog/worktrees/')
+  expect(fromClone.startsWith(root)).toBe(true)
+  expect(fromClone.slice(root.length)).toMatch(/^clone-0-[0-9a-f]{8}\/spec-25$/)
+  expect(await worktree(own)).toBe(fromClone)
+  // Another clone of the same name gets its own folder, and the start creates none.
+  expect(await worktree(ready().clone)).not.toBe(fromClone)
+  expect(existsSync(fromClone)).toBe(false)
 })
 
 test('integration and ticket branches of an earlier run on the remote do not get in the way of the start', async () => {
@@ -479,11 +468,6 @@ const CASES: Case[] = [
     prepare: (clone) =>
       writeFileSync(lock(clone), JSON.stringify({ pid: process.ppid, start: 1, spec: 7 })),
     message: [`A run on spec #7 is already in progress in this clone (PID ${process.ppid})`],
-  },
-  {
-    reason: 'the working tree is dirty',
-    prepare: (clone) => writeFileSync(join(clone, 'new.txt'), 'x'),
-    message: ['working tree is not clean'],
   },
   {
     reason: 'a branch spec lies on the remote',
@@ -825,11 +809,6 @@ test('without specs and without a terminal the start aborts at once, without gh 
 })
 
 test.each([
-  {
-    reason: 'the working tree is dirty',
-    prepare: (clone: string) => writeFileSync(join(clone, 'new.txt'), 'x'),
-    message: 'working tree is not clean',
-  },
   {
     reason: 'a run holds the lock without a spec number',
     prepare: (clone: string) =>

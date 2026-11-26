@@ -4,7 +4,7 @@ import { manualClock } from './clock.ts'
 import { type Choice, driveRun, type Event, type RunResult } from './engine.ts'
 import { git } from './git.ts'
 import { passthrough } from './sandbox.ts'
-import { commitFile, throwawayRepo } from './testing/throwaway-repo.ts'
+import { commitFile, throwawayRepo, worktreeOf } from './testing/throwaway-repo.ts'
 import { InMemoryTracker, type Ticket } from './tracker.ts'
 
 const ticket = (number: number, part: Partial<Ticket> = {}): Ticket => ({
@@ -34,6 +34,7 @@ function run(
     spec: 1,
     choice,
     directory: clone,
+    worktree: worktreeOf(clone),
     checks: [],
     tracker,
     agent: fakeAgent(script),
@@ -92,8 +93,8 @@ test('merge with conflict: merge aborted, integration and target branch unchange
   expect(result.finish).toEqual({ type: 'conflict' })
   expect(git(remote, 'rev-parse', 'main')).toBe(main)
   expect(git(remote, 'log', '--format=%s', 'spec/1')).toBe('Implement ticket 2\ninit')
-  expect(git(clone, 'status', '--porcelain')).toBe('')
-  expect(git(clone, 'branch', '--show-current')).toBe('spec/1')
+  expect(git(worktreeOf(clone), 'status', '--porcelain')).toBe('')
+  expect(git(worktreeOf(clone), 'branch', '--show-current')).toBe('spec/1')
   expect(tracker.isOpen(1)).toBe(true)
   expect(tracker.comments(1).slice(0, -1)).toEqual([])
 })

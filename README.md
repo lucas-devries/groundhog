@@ -28,7 +28,8 @@ Agents don't judge their own work here. **groundhog's engine is plain code with 
 - **Deterministic:** the next ticket comes fresh from the tracker, never from the agent.
 - **Verified:** a ticket counts as done only with a real commit, a clean tree and green checks.
 - **Bounded:** each ticket gets a fixed number of attempts. Then it goes to a human with an explanation, and the run carries on.
-- **Sandboxed:** every session and its checks run inside [`srt`](https://github.com/anthropics/sandbox-runtime). Only the working tree is writable, and only a fixed list of hosts is reachable.
+- **Sandboxed:** every session and its checks run inside [`srt`](https://github.com/anthropics/sandbox-runtime). Your working directory is not writable, and only a fixed list of hosts is reachable.
+- **Out of your way:** a run works in its own git worktree. You stay on your branch, keep your uncommitted changes and carry on in the same clone.
 - **Readable history:** each ticket becomes exactly one commit on the spec's integration branch.
 
 It builds on the [Matt Pocock skills](https://github.com/mattpocock/skills). After `/to-spec` and `/to-tickets` you have a spec with tickets in GitHub Issues, and groundhog takes it from there.
@@ -94,7 +95,11 @@ groundhog init
 groundhog 57
 ```
 
-Before it touches anything, groundhog checks the tools, logins, skills, the sandbox and a clean working tree. Then it asks everything at once: the target branch and the finish (merge, PR or nothing). It asks for confirmation once more if you choose to merge straight into `main`. After that, it needs no more input.
+Before it touches anything, groundhog checks the tools, logins, skills and the sandbox. A dirty working tree is fine. Then it asks everything at once: the target branch and the finish (merge, PR or nothing). It asks for confirmation once more if you choose to merge straight into `main`. After that, it needs no more input.
+
+### The run's worktree
+
+A run never touches your working directory. It works in a git worktree of your clone, at `~/.cache/groundhog/worktrees/<repo>-<hash>/spec-<n>`; the hash keeps two clones of the same repo apart. Every session, every check and every git step of the engine happens there. The worktree stays after the run, and the next run of the same spec reuses it: it discards everything uncommitted without asking, keeps ignored files such as `node_modules`, and checks out the pushed `spec/<n>`. Only the agent works there, so don't keep your own changes in it.
 
 ### Several specs in one start
 
@@ -120,7 +125,7 @@ Without an argument, groundhog offers every **ready spec**: an open issue with a
 
 | Key              | Default  | Meaning                                                                                                |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `checks`         | required | Shell commands, run in order in the repo root. The first red one ends the pass.                        |
+| `checks`         | required | Shell commands, run in order in the root of the run's worktree. The first red one ends the pass.       |
 | `attempts`       | `3`      | Attempts per ticket, 1 to 10.                                                                          |
 | `targetBranches` | required | Branches a run may finish into. The first one is preselected.                                          |
 | `sandbox.hosts`  | `[]`     | Extra hosts the sandbox may reach, for example a private registry.                                     |
@@ -134,7 +139,8 @@ The engine runs outside the sandbox. It holds your `gh` token and does every git
 
 Every session and its checks run inside `srt`:
 
-- **Writable:** the working tree, `~/.claude` (except `settings.json`), `~/.claude.json`, the npm cache and temp. `.git/hooks` and `.git/config` are read-only.
+- **Writable:** the run's worktree, the `.git` directory your clone shares with it, `~/.claude` (except `settings.json`), `~/.claude.json`, the npm cache and temp.
+- **Read-only:** `.git/hooks`, `.git/config`, the worktree's `.git` file, the files in `.git/worktrees/spec-<n>/` that point git elsewhere (`commondir`, `gitdir`, `config.worktree`) and everything else, your working directory included.
 - **Hidden:** `~/.ssh`, `~/.config/gh` and `~/.npmrc`.
 - **Network:** `api.anthropic.com`, `claude.ai`, `platform.claude.com`, `registry.npmjs.org`, `api.github.com` and `github.com`, plus your `sandbox.hosts`. Nothing else, and there's no switch for an open network.
 - **Refusals:** a call the sandbox refuses is a _block_. It doesn't change green or red, but it's highlighted in the transcript and counted in the summary.
@@ -154,8 +160,8 @@ Each run keeps a **log** under `.git/groundhog/runs/`, outside your working tree
 
 ## Stopping and resuming
 
-- **One Ctrl+C does nothing**, so a stray keypress can't cost you a night. Press it twice within 5 seconds to abort cleanly. groundhog then discards the ticket's work, deletes the ticket branch, removes your assignment and releases the lock.
-- **After a crash, just run the same command again.** The integration branch is pushed after every green ticket, so nothing is lost.
+- **One Ctrl+C does nothing**, so a stray keypress can't cost you a night. Press it twice within 5 seconds to abort cleanly. groundhog then discards the ticket's work in the worktree, leaves the worktree on `spec/<n>`, deletes the ticket branch, removes your assignment and releases the lock.
+- **After a crash, just run the same command again.** The integration branch is pushed after every green ticket, so no finished ticket is lost. Whatever a crash left in the worktree is discarded.
 - **Usage limit:** hitting it doesn't use up an attempt. groundhog waits for the reset and starts the same attempt again.
 - **Time limits:** a session gets 60 minutes and the checks get 15. Running into a limit counts as a red attempt.
 

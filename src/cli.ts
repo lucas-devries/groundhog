@@ -155,6 +155,7 @@ async function run(
       spec,
       choice: ready.choice,
       directory,
+      worktree: ready.worktree(spec),
       checks: config.checks,
       maxAttempts: config.attempts,
       token,
