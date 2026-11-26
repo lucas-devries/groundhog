@@ -171,6 +171,105 @@ test('a ticket that failed for good shows its reason and blocks its dependents',
   ])
 })
 
+/** The task-graph lines of the top, between the header and the rule. */
+const graphLines = (s: string[]) => s.slice(2, s.indexOf(rule))
+/** Tickets 1 to `count`, the ones in `closed` already done. */
+const numbered = (count: number, closed: number[] = []) =>
+  graph(
+    ...Array.from({ length: count }, (_, i) => ticket(i + 1, { open: !closed.includes(i + 1) })),
+  )
+
+test('more tickets than half the window: done tickets are left out first, in tracker order', () => {
+  // Half of 14 lines: header, blank and five lines of task-graph.
+  const s = screen([started, numbered(7, [1, 3, 4])])
+  expect(s.slice(0, 8)).toEqual([
+    'groundhog 1.2.3 · Spec #25 · target branch main · finish PR',
+    '',
+    '  #2 · waiting',
+    '  #5 · waiting',
+    '  #6 · waiting',
+    '  #7 · waiting',
+    '  … 3 more tickets',
+    rule,
+  ])
+  expect(s).toHaveLength(14)
+})
+
+test('only as many done tickets are left out as needed; tickets that just fit all stay', () => {
+  // Half of 15 lines is seven: header, blank and five lines of task-graph.
+  expect(graphLines(screen([started, numbered(5, [1, 2])], 60, 15))).toEqual([
+    '  #1 ✔ done',
+    '  #2 ✔ done',
+    '  #3 · waiting',
+    '  #4 · waiting',
+    '  #5 · waiting',
+  ])
+  expect(graphLines(screen([started, numbered(6, [1, 2, 3])], 60, 15))).toEqual([
+    '  #1 ✔ done',
+    '  #4 · waiting',
+    '  #5 · waiting',
+    '  #6 · waiting',
+    '  … 2 more tickets',
+  ])
+})
+
+test('running, paused and failed tickets are never left out', () => {
+  const attempt = (ticket: number): Event => ({
+    type: 'attempt-started',
+    ticket,
+    attempt: 1,
+    of: 3,
+    time: 0,
+  })
+  const reset = new Date(2026, 10, 25, 3, 10).getTime()
+  const run: Event[] = [
+    started,
+    numbered(9),
+    attempt(2),
+    { type: 'ticket-done', ticket: 2, commit: 'abc1234def', attempts: 1, time: 0 },
+    attempt(6),
+    { type: 'ticket-failed', ticket: 6, attempts: 3, verification: 'Check: npm test', time: 0 },
+    attempt(7),
+    { type: 'pause', ticket: 7, reset, time: reset - 60_000 },
+    attempt(8),
+    { type: 'verification', ticket: 8, name: 'Check: npm test', ok: false, time: 0 },
+    attempt(9),
+  ]
+  const kept = [
+    '  #6 ✘ ready-for-human · Check: npm test',
+    '  #7 ⏸ Pause at usage limit until 03:10',
+    '  #8 ↻ Attempt 1 of 3 failed',
+    '  #9 ▶ running · Attempt 1 of 3',
+  ]
+  // The ticket done in this run goes before the waiting ones.
+  expect(graphLines(screen(run, 60, 16))).toEqual(['  #1 · waiting', ...kept, '  … 4 more tickets'])
+  // Even where half the window is not enough for them.
+  const s = screen(run, 60, 10)
+  expect(graphLines(s)).toEqual([...kept, '  … 5 more tickets'])
+  expect(s).toHaveLength(10)
+})
+
+test('warnings and the summary line count towards half the window', () => {
+  const warning = (n: number): Event => ({ type: 'warning', text: `warning ${n}`, time: 0 })
+  const s = screen([started, numbered(8), warning(1)], 60, 12)
+  expect(s.slice(2, 7)).toEqual([
+    '  #1 · waiting',
+    '  #2 · waiting',
+    '  … 6 more tickets',
+    '⚠ warning 1',
+    rule,
+  ])
+  const crowded = screen([started, numbered(8), ...[1, 2, 3, 4, 5].map(warning)], 60, 12)
+  expect(crowded.slice(2, 7)).toEqual([
+    '  … 8 more tickets',
+    '⚠ warning 1',
+    '⚠ warning 2',
+    '⚠ warning 3',
+    rule,
+  ])
+  expect(crowded).toHaveLength(12)
+})
+
 test('warnings of the engine stand above the transcript', () => {
   const s = screen([
     started,

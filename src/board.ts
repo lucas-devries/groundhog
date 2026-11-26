@@ -40,6 +40,8 @@ export function board(options: BoardOptions = {}) {
   let tickets: GraphTicket[] = []
   /** State of the tickets this run has touched; the others show the tracker. */
   const state = new Map<number, string>()
+  /** Tickets this run has finished. */
+  const done = new Set<number>()
   const warnings: string[] = []
   const transcript: string[] = []
   /** Transcript line at the top while scrolled up; `undefined` follows the live end. */
@@ -92,6 +94,7 @@ export function board(options: BoardOptions = {}) {
         append(added)
         break
       case 'ticket-done':
+        done.add(e.ticket)
         state.set(e.ticket, s.green(`✔ done in attempt ${e.attempts}`))
         break
       case 'ticket-failed':
@@ -142,16 +145,42 @@ export function board(options: BoardOptions = {}) {
     }
   }
 
+  /**
+   * The lines of the task-graph, in the tracker's order and at most `max`: done tickets are left
+   * out first. Running, paused and failed tickets always stay, even beyond `max`.
+   */
+  const taskGraph = (max: number) => {
+    const [mustStay, open, finished] = [0, 1, 2]
+    /** The lower, the later a ticket is left out. */
+    const rank = (t: GraphTicket) => {
+      if (done.has(t.number)) return finished
+      if (state.has(t.number)) return mustStay
+      return t.state === 'closed' ? finished : open
+    }
+    const staying = tickets.filter((t) => rank(t) === mustStay).length
+    // One line less than `max` for the line that sums up the others.
+    const slots = tickets.length > max ? Math.max(staying, max - 1) : max
+    const shown = new Set(tickets.toSorted((a, b) => rank(a) - rank(b)).slice(0, slots))
+    const graph = tickets
+      .filter((t) => shown.has(t))
+      .map((t) => `  #${t.number} ${state.get(t.number) ?? before(t, s)}`)
+    const more = tickets.length - shown.size
+    if (more > 0) graph.push(`  … ${more} more ticket${more === 1 ? '' : 's'}`)
+    return { graph, staying }
+  }
+
   /** Exactly `height` lines, none wider than `width`. */
   const screen = (width: number, height: number): string[] => {
     const rule = s.dim('─'.repeat(width))
-    const top = [
-      header,
-      '',
-      ...tickets.map((t) => `  #${t.number} ${state.get(t.number) ?? before(t, s)}`),
-      ...warnings,
-      rule,
-    ].slice(0, Math.max(0, height - 2))
+    const half = Math.floor(height / 2)
+    const head = [header, '']
+    const { graph, staying } = taskGraph(half - head.length - warnings.length)
+    // Warnings give way to the cap; only tickets that must stay may exceed it.
+    const limit = staying ? Math.max(half, head.length + graph.length) : half
+    const top = [...[...head, ...graph, ...warnings].slice(0, limit), rule].slice(
+      0,
+      Math.max(0, height - 2),
+    )
     room = Math.max(0, height - 2 - top.length)
     const from = anchor ?? liveTop()
     const middle = transcript.slice(from, from + room)
