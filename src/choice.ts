@@ -1,4 +1,4 @@
-/** What a human chooses before a run, and the names that follow from it. */
+/** What a human chooses before a run, and the branch names of a run. */
 export interface Choice {
   targetBranch: string
   finish: 'merge' | 'pr' | 'none'
@@ -14,4 +14,9 @@ export const FINISH: Record<Choice['finish'], string> = {
 /** The integration branch of a spec. */
 export function integrationBranch(spec: number): string {
   return `spec/${spec}`
+}
+
+/** The branch the work on a ticket happens on. */
+export function ticketBranchOf(ticket: number): string {
+  return `ticket/${ticket}`
 }

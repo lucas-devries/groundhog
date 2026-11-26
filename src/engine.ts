@@ -1,13 +1,12 @@
-import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { Agent, Block, SessionResult } from './agent.ts'
-import { type Choice, integrationBranch } from './choice.ts'
+import { type Choice, integrationBranch, ticketBranchOf } from './choice.ts'
 import type { Clock } from './clock.ts'
 import { DEFAULT_ATTEMPTS } from './config.ts'
-import { commonDir, git } from './git.ts'
+import { branchExists, git } from './git.ts'
 import type { Sandbox } from './sandbox.ts'
 import { failedComment, resumeInfo, summary } from './summary.ts'
 import { type FrontierState, frontierState, type Ticket, type Tracker } from './tracker.ts'
+import { prepareWorktree } from './worktree.ts'
 
 export { type Choice, FINISH, integrationBranch } from './choice.ts'
 
@@ -127,10 +126,6 @@ const SETUP_TIME_LIMIT = 15 * MINUTE
 /** After the usage limit reset: `resetsAt` is rounded to seconds, the server clock may differ. */
 const RESET_BUFFER = MINUTE
 
-export function ticketBranchOf(ticket: number): string {
-  return `ticket/${ticket}`
-}
-
 /** Thrown by the engine at the places where it accepts an abort. */
 class Aborted extends Error {}
 
@@ -173,48 +168,15 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   }
   report({ type: 'run-started', spec, choice, worktree, versions: input.versions ?? {} })
 
-  /** A failed removal only warns: it must not cost the summary. */
-  const removeWorktree = () => {
-    try {
-      git(input.directory, 'worktree', 'remove', '--force', worktree)
-    } catch (error) {
-      report({
-        type: 'warning',
-        text: `Removing the worktree ${worktree} failed: ${(error as Error).message}`,
-      })
-    }
-  }
-
-  /**
-   * Lies in the worktree's git directory until `setup` has run through. A worktree that still has
-   * it (failed removal, abort, crash) is created anew, so that `setup` is never skipped.
-   */
-  const setupMarker = () =>
-    join(git(worktree, 'rev-parse', '--absolute-git-dir'), 'groundhog-setup-pending')
   const setup = input.setup ?? []
-  const fresh = !isWorktreeOf(input.directory, worktree) || existsSync(setupMarker())
-  if (fresh) {
-    rmSync(worktree, { recursive: true, force: true })
-    // -f twice also replaces a stale registration of this path, even a locked one.
-    git(input.directory, 'worktree', 'add', '-q', '-f', '-f', '--detach', worktree)
-    if (setup.length > 0) writeFileSync(setupMarker(), '')
-  }
-  /** Throws away the work in the worktree; everything there is the agent's. */
-  const discard = () => {
-    git(worktree, 'reset', '-q', '--hard')
-    git(worktree, 'clean', '-q', '-fd')
-  }
-  discard()
-  git(worktree, 'fetch', '-q', 'origin')
-  if (git(worktree, 'branch', '-r', '--list', `origin/${integration}`)) {
-    // The pushed state is what counts.
-    git(worktree, 'checkout', '-q', '--no-track', '-B', integration, `origin/${integration}`)
-  } else {
-    if (!branchExists(worktree, integration)) {
-      git(worktree, 'branch', '-q', '--no-track', integration, `origin/${choice.targetBranch}`)
-    }
-    git(worktree, 'checkout', '-q', integration)
-  }
+  const prepared = prepareWorktree({
+    clone: input.directory,
+    path: worktree,
+    spec,
+    targetBranch: choice.targetBranch,
+    hasSetup: setup.length > 0,
+    warn: (text) => report({ type: 'warning', text }),
+  })
 
   /** Runs `setup` in a new worktree, in order; returns the first red command, if there is one. */
   const runSetup = async (): Promise<CommandOutput | undefined> => {
@@ -229,18 +191,16 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
         : ''
       return { command, output: `${filter(execution.output)}${limit}` }
     }
-    rmSync(setupMarker(), { force: true })
-    // Only ignored files may stay; anything else would turn the first ticket red.
-    discard()
+    prepared.setupDone()
     return undefined
   }
 
   /** The claimed ticket that is not finished yet. */
   let taken: number | undefined
   try {
-    const failed = fresh ? await runSetup() : undefined
+    const failed = prepared.setupDue ? await runSetup() : undefined
     if (failed) {
-      removeWorktree()
+      prepared.remove()
       report({ type: 'run-halted', reason: 'setup', ...failed })
       const finish: FinishResult = { type: 'skipped', reason: 'setup failed' }
       await end(finish)
@@ -264,7 +224,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
           report,
         )
         // The spec is done. The branches stay; a conflict is resolved in the human's own directory.
-        if (finish.type !== 'skipped') removeWorktree()
+        if (finish.type !== 'skipped') prepared.remove()
         await end(finish)
         return { ...result, finish }
       }
@@ -396,7 +356,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
       }
 
       if (red) {
-        discard()
+        prepared.discard()
         git(worktree, 'checkout', '-q', '-f', integration)
         deleteTicketBranch(worktree, ticketBranch)
         await tracker.markFailed(nr)
@@ -468,7 +428,7 @@ export async function driveRun(input: RunInput): Promise<RunResult> {
   }
 
   // Orderly abort: discard the work, release the ticket, no comment on the spec.
-  discard()
+  prepared.discard()
   git(worktree, 'checkout', '-q', '-f', integration)
   if (taken !== undefined) {
     deleteTicketBranch(worktree, ticketBranchOf(taken))
@@ -547,27 +507,6 @@ async function doFinish(
       await comment(spec, `Integration branch: ${integration}`)
       return { type: 'none' }
   }
-}
-
-/**
- * Whether the folder is a working worktree of the clone. Anything else must not be handed to
- * `reset` or `clean`: git would then act on whatever repo lies above it.
- */
-function isWorktreeOf(clone: string, folder: string): boolean {
-  try {
-    return (
-      git(folder, 'rev-parse', '--show-toplevel') === realpathSync(folder) &&
-      realpathSync(commonDir(folder)) === realpathSync(commonDir(clone))
-    )
-  } catch {
-    // Usually no folder or no repo there. Any other git error replaces the folder too, which
-    // costs nothing: all it holds is the agent's (ADR 0001).
-    return false
-  }
-}
-
-function branchExists(directory: string, branch: string): boolean {
-  return git(directory, 'branch', '--list', branch) !== ''
 }
 
 function currentBranch(directory: string): string {
