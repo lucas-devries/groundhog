@@ -97,10 +97,10 @@ test('a ticket goes through its states; the transcript shows only the current se
   })
 
   let s = state({ type: 'ticket-taken', ticket: 27, time: 0 }, attempt(1), assistant(27, 'one'))
-  expect(s[2]).toBe('  #27 ▶ running · Attempt 1 of 3')
+  expect(s[2]).toBe('  #27 ▶ running')
   expect(s[3]).toBe('  #28 · waiting')
   expect(s.slice(5, 7)).toEqual(['  │ one', ''])
-  expect(s.at(-1)).toBe('#27 · Attempt 1 of 3')
+  expect(s.at(-1)).toBe('#27')
 
   s = state(
     verification('Session successful', true),
@@ -186,7 +186,7 @@ test('overlong lines are truncated, the transcript shows its end, the screen alw
   ])
 
   // A smaller window: nothing overflows, not even the task-graph.
-  expect(b.screen(18, 3)).toEqual(['groundhog 1.2.3 ·…', '─'.repeat(18), '#27 · Attempt 1 o…'])
+  expect(b.screen(18, 3)).toEqual(['groundhog 1.2.3 ·…', '─'.repeat(18), '#27'])
 })
 
 test('with colours, truncation is ANSI-safe', () => {

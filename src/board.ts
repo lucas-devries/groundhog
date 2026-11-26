@@ -27,7 +27,9 @@ export function board(options: BoardOptions = {}) {
   const warnings: string[] = []
   let transcript: string[] = []
   let footer = ''
+  /** ` · Attempt n of m` from the second attempt on; the first is just running. */
   let attempt = ''
+  let failed = ''
   let session: number | undefined
 
   const report = (e: Event): string[] => {
@@ -40,9 +42,10 @@ export function board(options: BoardOptions = {}) {
         tickets = e.tickets
         break
       case 'attempt-started':
-        attempt = `Attempt ${e.attempt} of ${e.of}`
-        state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
-        footer = `#${e.ticket} · ${attempt}`
+        attempt = e.attempt > 1 ? ` · Attempt ${e.attempt} of ${e.of}` : ''
+        failed = `Attempt ${e.attempt} of ${e.of} failed`
+        state.set(e.ticket, s.cyan(`▶ running${attempt}`))
+        footer = `#${e.ticket}${attempt}`
         transcript = []
         break
       case 'session-output':
@@ -50,13 +53,13 @@ export function board(options: BoardOptions = {}) {
         if (e.session !== session) {
           session = e.session
           transcript = []
-          state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
+          state.set(e.ticket, s.cyan(`▶ running${attempt}`))
         }
         transcript.push(...added)
         if (transcript.length > 2 * TRANSCRIPT_MAX) transcript = transcript.slice(-TRANSCRIPT_MAX)
         break
       case 'verification':
-        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${attempt} failed`))
+        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${failed}`))
         transcript.push(...added)
         break
       case 'pause':
@@ -68,7 +71,7 @@ export function board(options: BoardOptions = {}) {
         transcript.push(...added)
         break
       case 'ticket-done':
-        state.set(e.ticket, s.green(`✔ done in attempt ${e.attempts}`))
+        state.set(e.ticket, s.green(e.attempts > 1 ? `✔ done in attempt ${e.attempts}` : '✔ done'))
         break
       case 'ticket-failed':
         state.set(e.ticket, s.red(`✘ ready-for-human · ${e.verification}`))
