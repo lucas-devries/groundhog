@@ -98,10 +98,10 @@ test('a ticket goes through its states; the transcripts of every session stay in
   })
 
   let s = state({ type: 'ticket-taken', ticket: 27, time: 0 }, attempt(1), assistant(27, 'one'))
-  expect(s[2]).toBe('  #27 ▶ running · Attempt 1 of 3')
+  expect(s[2]).toBe('  #27 ▶ running')
   expect(s[3]).toBe('  #28 · waiting')
-  expect(s.slice(5, 8)).toEqual(['━━ #27 · Attempt 1 of 3', '  │ one', ''])
-  expect(s.at(-1)).toBe('#27 · Attempt 1 of 3')
+  expect(s.slice(5, 8)).toEqual(['━━ #27', '  │ one', ''])
+  expect(s.at(-1)).toBe('#27')
 
   s = state(
     verification('Session successful', true),
@@ -239,7 +239,7 @@ test('running, paused and failed tickets are never left out', () => {
     '  #6 ✘ ready-for-human · Check: npm test',
     '  #7 ⏸ Pause at usage limit until 03:10',
     '  #8 ↻ Attempt 1 of 3 failed',
-    '  #9 ▶ running · Attempt 1 of 3',
+    '  #9 ▶ running',
   ]
   // The ticket done in this run goes before the waiting ones.
   expect(graphLines(screen(run, 60, 16))).toEqual(['  #1 · waiting', ...kept, '  … 4 more tickets'])
@@ -304,7 +304,7 @@ test('overlong lines are truncated, the transcript shows its end, the screen alw
   ])
 
   // A smaller window: nothing overflows, not even the task-graph.
-  expect(b.screen(18, 3)).toEqual(['groundhog 1.2.3 ·…', '─'.repeat(18), '#27 · Attempt 1 o…'])
+  expect(b.screen(18, 3)).toEqual(['groundhog 1.2.3 ·…', '─'.repeat(18), '#27'])
 })
 
 test('the board holds the last 10,000 transcript lines and drops older ones', () => {
@@ -438,15 +438,15 @@ test('while scrolled up the view stays put and the footer counts the new lines',
   b.report({ type: 'attempt-started', ticket: 27, attempt: 1, of: 3, time: 0 })
   say(1)
   view()
-  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3')
+  expect(view().at(-1)).toBe('#27')
   b.input(KEY.pageUp)
   const kept = shown()
-  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 0 new lines · End to follow')
+  expect(view().at(-1)).toBe('#27 · ↓ 0 new lines · End to follow')
   say(1)
-  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 1 new line · End to follow')
+  expect(view().at(-1)).toBe('#27 · ↓ 1 new line · End to follow')
   say(6)
   expect(shown()).toEqual(kept)
-  expect(view().at(-1)).toBe('#27 · Attempt 1 of 3 · ↓ 7 new lines · End to follow')
+  expect(view().at(-1)).toBe('#27 · ↓ 7 new lines · End to follow')
 })
 
 test('reaching the end by scrolling or End follows the live end again', () => {

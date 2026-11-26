@@ -154,7 +154,7 @@ test('state changes of the tickets, verifications, blocks and warnings appear as
       'groundhog 1.0.0 · Spec #25 · target branch main · finish PR',
       '',
       '━━ #26 taken',
-      '  ▶ Attempt 1 of 3',
+      '  ▶ Running',
       // The reason is only in the log.
       '  ⛔ Block: Bash rm -rf ~/.ssh',
       '  ⛔ Block: Write /etc/hosts',
@@ -291,7 +291,7 @@ test('a real session, reported through the engine, appears continuously without 
   }
   expect(from('━━ #2 taken', 3)).toEqual([
     '━━ #2 taken',
-    '  ▶ Attempt 1 of 3',
+    '  ▶ Running',
     '  │ ⏺ Write /tmp/echter-run/fizzbuzz.mjs',
   ])
   expect(from('  │ ⏺ Edit /tmp/echter-run/fizzbuzz.mjs', 5)).toEqual([
@@ -316,7 +316,7 @@ test('a real session, reported through the engine, appears continuously without 
     '  ✔ working tree clean',
   ])
   expect(lines).toContain('  ✔ Check: true')
-  expect(lines.find((l) => l.startsWith('✔ #2 done in attempt 1 · commit '))).toBeDefined()
+  expect(lines.find((l) => l.startsWith('✔ #2 done · commit '))).toBeDefined()
 })
 
 test('with colour: + green, - red, code with syntax colours, errors red', () => {

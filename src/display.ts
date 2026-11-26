@@ -63,7 +63,7 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
       case 'ticket-taken':
         return ['', s.bold(`━━ #${e.ticket} taken`)]
       case 'attempt-started':
-        return [`  ${s.cyan('▶')} Attempt ${e.attempt} of ${e.of}`]
+        return [`  ${s.cyan('▶')} ${e.attempt > 1 ? `Attempt ${e.attempt} of ${e.of}` : 'Running'}`]
       case 'session-finished':
         // The reason of a block is only in the log.
         return (e.blocks ?? []).map((b) =>
@@ -80,7 +80,7 @@ export function display(options: DisplayOptions = {}): (e: Event) => string[] {
       case 'ticket-done':
         integrated++
         return [
-          `${s.green('✔')} ${s.bold(`#${e.ticket} done`)} in attempt ${e.attempts} · commit ${e.commit.slice(0, 7)}`,
+          `${s.green('✔')} ${s.bold(`#${e.ticket} done`)}${e.attempts > 1 ? ` in attempt ${e.attempts}` : ''} · commit ${e.commit.slice(0, 7)}`,
         ]
       case 'ticket-failed':
         return [

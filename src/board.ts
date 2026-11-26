@@ -51,7 +51,9 @@ export function board(options: BoardOptions = {}) {
   /** Height of the transcript as `screen` drew it last. */
   let room = 0
   let footer = ''
+  /** ` · Attempt n of m` from the second attempt on; the first is just running. */
   let attempt = ''
+  let failed = ''
   const append = (added: string[]) => {
     transcript.push(...added)
     const dropped = transcript.splice(0, transcript.length - TRANSCRIPT_MAX).length
@@ -71,18 +73,19 @@ export function board(options: BoardOptions = {}) {
         tickets = e.tickets
         break
       case 'attempt-started':
-        attempt = `Attempt ${e.attempt} of ${e.of}`
-        state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
-        footer = `#${e.ticket} · ${attempt}`
+        attempt = e.attempt > 1 ? ` · Attempt ${e.attempt} of ${e.of}` : ''
+        failed = `Attempt ${e.attempt} of ${e.of} failed`
+        state.set(e.ticket, s.cyan(`▶ running${attempt}`))
+        footer = `#${e.ticket}${attempt}`
         append([s.bold(`━━ ${footer}`)])
         break
       case 'session-output':
         // Also ends a pause: the attempt restarted in a new session.
-        state.set(e.ticket, s.cyan(`▶ running · ${attempt}`))
+        state.set(e.ticket, s.cyan(`▶ running${attempt}`))
         append(added)
         break
       case 'verification':
-        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${attempt} failed`))
+        if (!e.ok) state.set(e.ticket, s.yellow(`↻ ${failed}`))
         append(added)
         break
       case 'pause':
@@ -95,7 +98,7 @@ export function board(options: BoardOptions = {}) {
         break
       case 'ticket-done':
         done.add(e.ticket)
-        state.set(e.ticket, s.green(`✔ done in attempt ${e.attempts}`))
+        state.set(e.ticket, s.green(e.attempts > 1 ? `✔ done in attempt ${e.attempts}` : '✔ done'))
         break
       case 'ticket-failed':
         state.set(e.ticket, s.red(`✘ ready-for-human · ${e.verification}`))
