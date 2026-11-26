@@ -41,7 +41,10 @@ export interface InitOptions {
 const abort = (message: string) => ({ exitCode: 1, message })
 const CTRL_C = { exitCode: 130, message: `Aborted. ${FILE} was not written.` }
 
-/** `groundhog init`: asks for the project config and writes only `groundhog.json`. */
+/**
+ * `groundhog init`: asks for the project config, writes only `groundhog.json` and, if it differs
+ * from the committed one, commits it on request. Never pushes.
+ */
 export async function init({
   directory,
   dialog,
@@ -138,10 +141,40 @@ export async function init({
     },
   }
   writeFileSync(join(directory, FILE), `${JSON.stringify(config, null, 2)}\n`)
-  return {
-    exitCode: 0,
-    message: `${FILE} written. Commit the file, then start groundhog <spec>.`,
+
+  // The flags also report an untracked or ignored file, whatever the git config hides.
+  if (!git(directory, 'status', '--porcelain', '--untracked-files=all', '--ignored', '--', FILE)) {
+    return {
+      exitCode: 0,
+      message: `The project config ${FILE} is unchanged. Start groundhog <spec>.`,
+    }
   }
+  const commit = await dialog.confirm({
+    message: `Commit ${FILE} now?`,
+    initialValue: true,
+    active: 'Yes',
+    inactive: 'No',
+  })
+  if (typeof commit === 'symbol') {
+    return { exitCode: 130, message: `Aborted. ${FILE} was written but not committed.` }
+  }
+  if (!commit) {
+    return {
+      exitCode: 0,
+      message: `${FILE} written. Commit the file, then start groundhog <spec>.`,
+    }
+  }
+  try {
+    git(directory, 'add', '--', FILE)
+    // With a path, `commit` takes only this file and leaves everything else staged.
+    git(directory, 'commit', '-m', 'Configure groundhog', '--', FILE)
+  } catch (error) {
+    // Git reports some refusals on stdout, not on stderr. `join` drops a missing stream.
+    const { stdout, stderr } = error as { stdout?: string; stderr?: string }
+    const output = [stdout, stderr].join('').trim()
+    return abort(`${output}\n${FILE} written, but the commit failed. Commit ${FILE} yourself.`)
+  }
+  return { exitCode: 0, message: `${FILE} committed. Start groundhog <spec>.` }
 }
 
 const lines = (text = '') =>
